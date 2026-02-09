@@ -200,7 +200,7 @@ LLVM_CONFIG=$(brew --prefix llvm)/bin/llvm-config poetry install
 # LLVM_CONFIG=/usr/bin/llvm-config poetry install
 
 # Activate virtual environment
-poetry shell
+poetry env activate
 ```
 
 ### 4. Compile Protocol Buffers
@@ -235,7 +235,7 @@ There are two ways to run the server:
 poetry run uvicorn app:app --reload --host 0.0.0.0 --port ${PORT}
 
 # Local development mode with ngrok auto-configuration
-poetry run python run.py --local-dev
+poetry run python app/main.py --local-dev
 ```
 
 The local development mode simplifies WebSocket setup by:
@@ -253,20 +253,34 @@ The local development mode simplifies WebSocket setup by:
    brew install ngrok  # macOS
    ```
 
-2. Start ngrok tunnels for your bot connections:
+2. Sign up for an ngrok account at https://dashboard.ngrok.com/signup and get your authtoken.
+
+3. Configure your ngrok authtoken:
+
+   ```bash
+   ngrok config add-authtoken YOUR_AUTHTOKEN_HERE
+   ```
+
+4. Start ngrok tunnels for your bot connections:
 
    ```bash
    # Start ngrok with the provided configuration
    ngrok start --all --config config/ngrok/config.yml
    ```
 
-3. Start the server in local development mode:
+   This will create two tunnels (ports 7014 and 7015) for running multiple bots.
+
+5. Copy the ngrok HTTPS URL (e.g., `https://xxxx.ngrok-free.app`) and set it as `BASE_URL` in your `.env` file:
 
    ```bash
-   poetry run python run.py --local-dev
+   BASE_URL=https://xxxx.ngrok-free.app
    ```
 
-4. When prompted, enter the ngrok URLs shown in the ngrok terminal.
+6. Start the server:
+
+   ```bash
+   poetry run uvicorn app:app --reload --host 0.0.0.0 --port 7014
+   ```
 
 ### Creating Bots via API
 

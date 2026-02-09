@@ -3,16 +3,16 @@
 # See https://fly.io/docs/reference/configuration/ for information about how to use this file.
 #
 
-app = 'speaking-meetingbaas'
-primary_region = 'cdg'
+app = 'meetingbots'
+primary_region = 'iad'
 
 [build]
 
 [env]
-  PORT = "${PORT}"
+  PORT = "7014"
 
 [http_service]
-  internal_port = ${PORT}
+  internal_port = 7014
   force_https = true
   auto_stop_machines = 'off'
   auto_start_machines = true
@@ -23,7 +23,3 @@ primary_region = 'cdg'
   memory = '2gb'
   cpu_kind = 'shared'
   cpus = 2
-
-[[services]]
-  internal_port = ${PORT}
-  processes = ["app"]

@@ -13,6 +13,14 @@ from utils.ngrok import LOCAL_DEV_MODE, log_ngrok_status, release_ngrok_url
 websocket_router = APIRouter()
 
 
+def find_client_id_by_meetingbaas_bot_id(meetingbaas_bot_id: str) -> str | None:
+    """Look up the internal client_id by MeetingBaas bot_id."""
+    for internal_id, details in MEETING_DETAILS.items():
+        if len(details) > 2 and details[2] == meetingbaas_bot_id:
+            return internal_id
+    return None
+
+
 @websocket_router.websocket("/ws/{client_id}")
 async def websocket_endpoint(websocket: WebSocket, client_id: str):
     """Handle WebSocket connections from clients."""
@@ -21,13 +29,20 @@ async def websocket_endpoint(websocket: WebSocket, client_id: str):
 
     try:
         # Get meeting details from our in-memory storage
+        # First try direct lookup, then try to find by MeetingBaas bot_id
+        internal_client_id = client_id
         if client_id not in MEETING_DETAILS:
-            logger.error(f"No meeting details found for client {client_id}")
-            await websocket.close(code=1008, reason="Missing meeting details")
-            return
+            # MeetingBaas might be connecting with its own bot_id instead of our internal client_id
+            internal_client_id = find_client_id_by_meetingbaas_bot_id(client_id)
+            if internal_client_id:
+                logger.info(f"Found internal client_id {internal_client_id} for MeetingBaas bot_id {client_id}")
+            else:
+                logger.error(f"No meeting details found for client {client_id}")
+                await websocket.close(code=1008, reason="Missing meeting details")
+                return
 
         # Get stored meeting details with fallbacks to ensure compatibility
-        meeting_details = MEETING_DETAILS[client_id]
+        meeting_details = MEETING_DETAILS[internal_client_id]
         meeting_url = meeting_details[0] if len(meeting_details) > 0 else None
         persona_name = meeting_details[1] if len(meeting_details) > 1 else None
         meetingbaas_bot_id = meeting_details[2] if len(meeting_details) > 2 else None
@@ -39,20 +54,20 @@ async def websocket_endpoint(websocket: WebSocket, client_id: str):
         )
 
         logger.info(
-            f"Retrieved meeting details for {client_id}: {meeting_url}, {persona_name}, {meetingbaas_bot_id}, {enable_tools}, {streaming_audio_frequency}"
+            f"Retrieved meeting details for {internal_client_id}: {meeting_url}, {persona_name}, {meetingbaas_bot_id}, {enable_tools}, {streaming_audio_frequency}"
         )
 
         # Check if a Pipecat process is already running for this client
         if (
-            client_id in PIPECAT_PROCESSES
-            and PIPECAT_PROCESSES[client_id].poll() is None
+            internal_client_id in PIPECAT_PROCESSES
+            and PIPECAT_PROCESSES[internal_client_id].poll() is None
         ):
-            logger.info(f"Pipecat process already running for client {client_id}")
+            logger.info(f"Pipecat process already running for client {internal_client_id}")
         else:
             # Start Pipecat process if not already running
-            pipecat_websocket_url = f"ws://localhost:7014/pipecat/{client_id}"
+            pipecat_websocket_url = f"ws://localhost:7014/pipecat/{internal_client_id}"
             process = start_pipecat_process(
-                client_id=client_id,
+                client_id=internal_client_id,
                 websocket_url=pipecat_websocket_url,
                 meeting_url=meeting_url,
                 persona_data={"name": persona_name},
@@ -63,9 +78,9 @@ async def websocket_endpoint(websocket: WebSocket, client_id: str):
             )
 
             # Store the process for cleanup
-            PIPECAT_PROCESSES[client_id] = process
+            PIPECAT_PROCESSES[internal_client_id] = process
 
-        # Process messages
+        # Process messages - route to Pipecat using internal_client_id
         while True:
             try:
                 message = await websocket.receive()
@@ -74,14 +89,15 @@ async def websocket_endpoint(websocket: WebSocket, client_id: str):
                     logger.info(f"WebSocket for client {client_id} closed by client.")
                     break
                 raise
-            
+
             # logger.info(f"Received message type: {type(message)}, keys: {list(message.keys())}")
             if "bytes" in message:
                 audio_data = message["bytes"]
                 logger.debug(
                     f"Received audio data ({len(audio_data)} bytes) from client {client_id}"
                 )
-                await message_router.send_to_pipecat(audio_data, client_id)
+                # Route to Pipecat using internal_client_id
+                await message_router.send_to_pipecat(audio_data, internal_client_id)
             elif "text" in message:
                 text_data = message["text"]
                 logger.info(
@@ -92,29 +108,29 @@ async def websocket_endpoint(websocket: WebSocket, client_id: str):
     except Exception as e:
         logger.error(f"Error in WebSocket connection: {e} (repr: {repr(e)})")
     finally:
-        # Clean up
-        if client_id in PIPECAT_PROCESSES:
-            process = PIPECAT_PROCESSES[client_id]
+        # Clean up using internal_client_id
+        if internal_client_id in PIPECAT_PROCESSES:
+            process = PIPECAT_PROCESSES[internal_client_id]
             if process and process.poll() is None:  # If process is still running
                 try:
                     if terminate_process_gracefully(process, timeout=3.0):
                         logger.info(
-                            f"Gracefully terminated Pipecat process for client {client_id}"
+                            f"Gracefully terminated Pipecat process for client {internal_client_id}"
                         )
                     else:
                         logger.warning(
-                            f"Had to forcefully kill Pipecat process for client {client_id}"
+                            f"Had to forcefully kill Pipecat process for client {internal_client_id}"
                         )
                 except Exception as e:
                     logger.error(f"Error terminating process: {e}")
             # Remove from our storage
-            PIPECAT_PROCESSES.pop(client_id, None)
+            PIPECAT_PROCESSES.pop(internal_client_id, None)
 
-        if client_id in MEETING_DETAILS:
-            MEETING_DETAILS.pop(client_id, None)
+        if internal_client_id in MEETING_DETAILS:
+            MEETING_DETAILS.pop(internal_client_id, None)
 
         # Mark client as closing to prevent further message sending
-        message_router.mark_closing(client_id)
+        message_router.mark_closing(internal_client_id)
 
         # Gracefully disconnect - wrapping in try/except to handle already closed connections
         try:

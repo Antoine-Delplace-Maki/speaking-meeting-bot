@@ -96,6 +96,7 @@ def create_meeting_bot(
     entry_message: Optional[str] = None,
     extra: Optional[Dict[str, Any]] = None,
     streaming_audio_frequency: str = "16khz",
+    webhook_url: Optional[str] = None,
 ):
     """
     Direct API call to MeetingBaas to create a bot
@@ -138,6 +139,7 @@ def create_meeting_bot(
         bot_image=bot_image,
         entry_message=entry_message,
         extra=extra,
+        webhook_url=webhook_url,
     )
 
     # Convert request to dict for the API call with custom handler for non-serializable types

@@ -138,9 +138,17 @@ class VoiceUtils:
                 ]
             )
 
+            # Truncate the persona prompt to avoid context length errors
+            # Voice matching only needs the core description, not additional content
+            persona_prompt = persona.get('prompt', '')
+            max_prompt_chars = 1500  # Keep it brief for voice matching
+            if len(persona_prompt) > max_prompt_chars:
+                persona_prompt = persona_prompt[:max_prompt_chars] + "..."
+                logger.info(f"Truncated persona prompt for voice matching (was {len(persona['prompt'])} chars)")
+
             prompt = f"""Given this persona:
 Name: {persona['name']}
-Description: {persona['prompt']}
+Description: {persona_prompt}
 Gender: {persona.get('gender', 'Unknown')}
 
 And these available voices:
@@ -149,9 +157,9 @@ And these available voices:
 Which voice number (1-{len(voices)}) would be the most appropriate match? 
 Respond with ONLY the number."""
 
-            # Get GPT-4's recommendation
+            # Get GPT-4o-mini's recommendation (128k context, faster and cheaper)
             response = self.client.chat.completions.create(
-                model="gpt-4",
+                model="gpt-4o-mini",
                 messages=[{"role": "user", "content": prompt}],
                 max_tokens=10,
             )

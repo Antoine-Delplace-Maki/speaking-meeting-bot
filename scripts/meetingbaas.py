@@ -205,7 +205,8 @@ async def main(
     else:
         log_and_flush(logging.INFO, "[PERSONA] No additional content found for persona")
 
-    voice_id = os.getenv("CARTESIA_VOICE_ID")
+    # Use the voice ID from the persona data, falling back to env var if not set
+    voice_id = persona.get("cartesia_voice_id") or os.getenv("CARTESIA_VOICE_ID")
     log_and_flush(logging.INFO, f"[PERSONA] Using voice ID: {voice_id}")
 
     tts = CartesiaTTSService(
@@ -413,11 +414,32 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
+    # Determine persona name from persona data JSON if provided
+    persona_name = args.persona_name
+    if args.persona_data_json:
+        try:
+            import json
+            persona_data = json.loads(args.persona_data_json)
+            # Use the folder name key if available, otherwise fall back to looking up by display name
+            # The persona_data should contain a key that matches the folder name
+            # For now, we'll extract it from the persona data or use a mapping
+            # The persona folder names are like "interviewer", not "Technical Interviewer Bot"
+            # We need to find the folder name that corresponds to this persona
+            from config.persona_utils import PersonaManager
+            pm = PersonaManager()
+            # Try to find persona by matching the display name
+            for folder_name, data in pm.personas.items():
+                if data.get("name") == persona_data.get("name"):
+                    persona_name = folder_name
+                    break
+        except Exception as e:
+            print(f"Error parsing persona data JSON: {e}")
+
     # Run the bot
     asyncio.run(
         main(
             meeting_url=args.meeting_url,
-            persona_name=args.persona_name,
+            persona_name=persona_name,
             entry_message=args.entry_message,
             bot_image=args.bot_image,
             streaming_audio_frequency=args.streaming_audio_frequency,

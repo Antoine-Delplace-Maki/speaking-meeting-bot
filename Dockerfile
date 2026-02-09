@@ -36,5 +36,5 @@ ENV PORT=7014
 
 EXPOSE ${PORT}
 
-CMD ["poetry", "run", "uvicorn", "app:app", "--host", "0.0.0.0", "--port", "${PORT}"]
+CMD poetry run uvicorn app:app --host 0.0.0.0 --port ${PORT:-7014}
 

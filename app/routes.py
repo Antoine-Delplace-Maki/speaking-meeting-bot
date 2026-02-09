@@ -286,6 +286,8 @@ async def join_meeting(request: BotRequest, client_request: Request):
 
     # Create bot directly through MeetingBaas API
     # Use persona display name from resolved_persona_data for MeetingBaas API call
+    # Use the websocket_url as the webhook_url (same base URL, different endpoint)
+    webhook_url = f"{websocket_url}/webhook"
     meetingbaas_bot_id = create_meeting_bot(
         meeting_url=request.meeting_url,
         websocket_url=websocket_url,
@@ -296,6 +298,7 @@ async def join_meeting(request: BotRequest, client_request: Request):
         entry_message=final_entry_message,
         extra=request.extra,
         streaming_audio_frequency=streaming_audio_frequency,
+        webhook_url=webhook_url,
     )
 
     if meetingbaas_bot_id:
@@ -541,3 +544,23 @@ async def generate_persona_image(request: PersonaImageRequest) -> PersonaImageRe
             # Default to internal server error
             status_code = status.HTTP_500_INTERNAL_SERVER_ERROR
         raise HTTPException(status_code=status_code, detail=str(e))
+
+
+@router.post(
+    "/webhook",
+    tags=["webhook"],
+    status_code=status.HTTP_200_OK,
+)
+async def meetingbaas_webhook(request: Request):
+    """
+    Webhook endpoint for MeetingBaas callbacks.
+
+    Receives events like bot_joined, bot_left, transcription, etc.
+    """
+    try:
+        body = await request.json()
+        logger.info(f"Received MeetingBaas webhook: {body}")
+        return {"status": "ok"}
+    except Exception as e:
+        logger.error(f"Error processing webhook: {e}")
+        return {"status": "error", "message": str(e)}
