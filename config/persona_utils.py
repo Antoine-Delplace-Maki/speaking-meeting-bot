@@ -50,6 +50,7 @@ class PersonaManager:
             "cartesia_voice_id": "",
             "gender": "",
             "relevant_links": [],
+            "randomize": "",
         }  # Default values
         for section in sections:
             if section.startswith("Metadata"):
@@ -78,6 +79,7 @@ class PersonaManager:
             "cartesia_voice_id": metadata.get("cartesia_voice_id", ""),
             "gender": metadata.get("gender", ""),
             "relevant_links": metadata.get("relevant_links", []),
+            "randomize": metadata.get("randomize", "").lower() == "true",
         }
 
     def load_additional_content(self, persona_dir: Path) -> str:

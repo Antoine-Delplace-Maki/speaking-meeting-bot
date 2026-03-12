@@ -45,6 +45,7 @@ from utils.ngrok import (
     update_ngrok_client_id,
 )
 from config.prompts import PERSONA_INTERACTION_INSTRUCTIONS
+from config.candidate_randomizer import generate_random_candidate
 
 # Import the new persona detail extraction service
 from app.services.persona_detail_extraction import extract_persona_details_from_prompt
@@ -199,6 +200,13 @@ async def join_meeting(request: BotRequest, client_request: Request):
             persona_name_for_logging = resolved_persona_data.get("name", resolved_persona_name)
             final_prompt = resolved_persona_data["prompt"] + PERSONA_INTERACTION_INSTRUCTIONS
             logger.info(f"Using pre-defined persona '{persona_name_for_logging}'.")
+
+            if resolved_persona_data.get("randomize"):
+                logger.info(f"Persona '{persona_name_for_logging}' has randomize=true, generating random identity...")
+                resolved_persona_data = await generate_random_candidate(resolved_persona_data)
+                persona_name_for_logging = resolved_persona_data["name"]
+                final_prompt = resolved_persona_data["prompt"] + PERSONA_INTERACTION_INSTRUCTIONS
+                logger.info(f"Randomized persona to '{persona_name_for_logging}' ({resolved_persona_data['gender']})")
         except KeyError as e:
             logger.error(f"Resolved persona '{resolved_persona_name}' not found: {e}. Falling back to baas_onboarder.")
             resolved_persona_data = persona_manager.get_persona("baas_onboarder")

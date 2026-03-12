@@ -104,6 +104,7 @@ async def main(
     streaming_audio_frequency: str = "24khz",
     websocket_url: str = "",
     enable_tools: bool = True,
+    persona_data_override: dict = None,
 ):
     """
     Run the MeetingBaas bot with specified configurations
@@ -163,12 +164,19 @@ async def main(
     log_and_flush(logging.INFO, f"[TRANSPORT] Audio out enabled: True, sample_rate: {output_sample_rate}")
     log_and_flush(logging.INFO, "[TRANSPORT] Audio in enabled: True, VAD sample_rate: 16000")
 
-    persona_manager = PersonaManager()
-    persona = persona_manager.get_persona(persona_name)
-    if not persona:
-        log_and_flush(logging.ERROR, f"[ERROR] Persona '{persona_name}' not found")
-        return
-    log_and_flush(logging.INFO, f"[PERSONA] Loaded persona: {persona_name}")
+    if persona_data_override and persona_data_override.get("is_temporary"):
+        from config.prompts import PERSONA_INTERACTION_INSTRUCTIONS
+        persona = persona_data_override.copy()
+        if PERSONA_INTERACTION_INSTRUCTIONS not in persona.get("prompt", ""):
+            persona["prompt"] = persona["prompt"] + PERSONA_INTERACTION_INSTRUCTIONS
+        log_and_flush(logging.INFO, f"[PERSONA] Using temporary persona override: {persona.get('name', persona_name)}")
+    else:
+        persona_manager = PersonaManager()
+        persona = persona_manager.get_persona(persona_name)
+        if not persona:
+            log_and_flush(logging.ERROR, f"[ERROR] Persona '{persona_name}' not found")
+            return
+    log_and_flush(logging.INFO, f"[PERSONA] Loaded persona: {persona.get('name', persona_name)}")
 
     additional_content = persona.get("additional_content", "")
     if additional_content:
@@ -410,24 +418,24 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
-    # Determine persona name from persona data JSON if provided
+    # Determine persona name and optional override from persona data JSON
     persona_name = args.persona_name
+    persona_data_override = None
     if args.persona_data_json:
         try:
             import json
             persona_data = json.loads(args.persona_data_json)
-            # Use the folder name key if available, otherwise fall back to looking up by display name
-            # The persona_data should contain a key that matches the folder name
-            # For now, we'll extract it from the persona data or use a mapping
-            # The persona folder names are like "interviewer", not "Technical Interviewer Bot"
-            # We need to find the folder name that corresponds to this persona
-            from config.persona_utils import PersonaManager
-            pm = PersonaManager()
-            # Try to find persona by matching the display name
-            for folder_name, data in pm.personas.items():
-                if data.get("name") == persona_data.get("name"):
-                    persona_name = folder_name
-                    break
+
+            if persona_data.get("is_temporary"):
+                persona_data_override = persona_data
+                persona_name = persona_data.get("name", persona_name)
+            else:
+                from config.persona_utils import PersonaManager
+                pm = PersonaManager()
+                for folder_name, data in pm.personas.items():
+                    if data.get("name") == persona_data.get("name"):
+                        persona_name = folder_name
+                        break
         except Exception as e:
             print(f"Error parsing persona data JSON: {e}")
 
@@ -441,5 +449,6 @@ if __name__ == "__main__":
             streaming_audio_frequency=args.streaming_audio_frequency,
             websocket_url=args.websocket_url,
             enable_tools=args.enable_tools,
+            persona_data_override=persona_data_override,
         )
     )
