@@ -291,10 +291,10 @@ async def main(
             vad_analyzer=SileroVADAnalyzer(
                 sample_rate=16000,
                 params=VADParams(
-                    threshold=0.5,
-                    min_speech_duration_ms=250,
-                    min_silence_duration_ms=100,
-                    min_volume=0.6,
+                    threshold=0.3,
+                    min_speech_duration_ms=200,
+                    min_silence_duration_ms=300,
+                    min_volume=0.15,
                 ),
             ),
         ),

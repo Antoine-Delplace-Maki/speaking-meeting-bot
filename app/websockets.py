@@ -2,6 +2,8 @@
 
 import asyncio
 import os
+import time
+
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
 from core.connection import MEETING_DETAILS, PIPECAT_PROCESSES, registry
@@ -14,6 +16,9 @@ INTERNAL_PORT = os.getenv("PORT", "7014")
 
 websocket_router = APIRouter()
 
+_cleaned_up_clients: dict[str, float] = {}
+_CLEANUP_REMEMBER_SECONDS = 300
+
 
 def find_client_id_by_meetingbaas_bot_id(meetingbaas_bot_id: str) -> str | None:
     """Look up the internal client_id by MeetingBaas bot_id."""
@@ -23,23 +28,42 @@ def find_client_id_by_meetingbaas_bot_id(meetingbaas_bot_id: str) -> str | None:
     return None
 
 
+def _is_stale_client(client_id: str) -> bool:
+    """Return True if this client was already cleaned up recently."""
+    ts = _cleaned_up_clients.get(client_id)
+    if ts is None:
+        return False
+    if time.monotonic() - ts > _CLEANUP_REMEMBER_SECONDS:
+        _cleaned_up_clients.pop(client_id, None)
+        return False
+    return True
+
+
 @websocket_router.websocket("/ws/{client_id}")
 async def websocket_endpoint(websocket: WebSocket, client_id: str):
     """Handle WebSocket connections from clients."""
     await registry.connect(websocket, client_id)
+
+    if _is_stale_client(client_id):
+        logger.info(
+            f"Ignoring reconnection from already-cleaned-up "
+            f"client {client_id}"
+        )
+        await websocket.close(
+            code=1000, reason="Session already ended"
+        )
+        return
+
     logger.info(f"Client {client_id} connected")
 
     try:
-        # Get meeting details from our in-memory storage
-        # First try direct lookup, then try to find by MeetingBaas bot_id
         internal_client_id = client_id
         if client_id not in MEETING_DETAILS:
-            # MeetingBaas might be connecting with its own bot_id instead of our internal client_id
             internal_client_id = find_client_id_by_meetingbaas_bot_id(client_id)
             if internal_client_id:
                 logger.info(f"Found internal client_id {internal_client_id} for MeetingBaas bot_id {client_id}")
             else:
-                logger.error(f"No meeting details found for client {client_id}")
+                logger.warning(f"No meeting details found for client {client_id}")
                 await websocket.close(code=1008, reason="Missing meeting details")
                 return
 
@@ -110,7 +134,10 @@ async def websocket_endpoint(websocket: WebSocket, client_id: str):
     except Exception as e:
         logger.error(f"Error in WebSocket connection: {e} (repr: {repr(e)})")
     finally:
-        # Clean up using internal_client_id
+        _cleaned_up_clients[client_id] = time.monotonic()
+        if internal_client_id != client_id:
+            _cleaned_up_clients[internal_client_id] = time.monotonic()
+
         if internal_client_id in PIPECAT_PROCESSES:
             process = PIPECAT_PROCESSES[internal_client_id]
             if process and process.poll() is None:  # If process is still running
