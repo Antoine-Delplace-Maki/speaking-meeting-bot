@@ -44,6 +44,24 @@ INTERNAL_PORT = os.getenv("PORT", "7014")
 router = APIRouter()
 
 
+def _build_image_prompt(persona: dict) -> str:
+    """Build a short, appearance-only prompt for image generation.
+
+    Avoids passing the full system prompt (which contains behavioural
+    instructions that trip content-policy filters).
+    """
+    name = persona.get("name", "a professional")
+    gender = persona.get("gender", "")
+    characteristics = persona.get("characteristics", [])
+
+    parts = [f"A friendly {gender.lower()} professional" if gender else "A friendly professional"]
+
+    if characteristics:
+        parts.append(", ".join(characteristics[:4]))
+
+    return ". ".join(parts)
+
+
 @router.post(
     "/bots",
     tags=["bots"],
@@ -180,25 +198,30 @@ async def join_meeting(request: BotRequest, client_request: Request):
 
     # Populate image if not present
     if not resolved_persona_data.get("image"):
-        image_prompt_desc = resolved_persona_data.get("description") or resolved_persona_data.get("prompt")
-        if image_prompt_desc:
-            logger.info(f"Attempting to generate image for '{persona_name_for_logging}' with prompt: {image_prompt_desc}")
-            try:
-                generated_image = await image_service.generate_persona_image(
-                    name=resolved_persona_data.get("name", "Bot"), # Use persona's resolved name
-                    prompt=image_prompt_desc,
-                    style="cinematic, detailed, photorealistic, professional headshot",
-                    size=(512, 512)
+        image_prompt = _build_image_prompt(resolved_persona_data)
+        logger.info(
+            f"Generating image for '{persona_name_for_logging}': "
+            f"{image_prompt}"
+        )
+        try:
+            generated_image = await image_service.generate_persona_image(
+                name=resolved_persona_data.get("name", "Bot"),
+                prompt=image_prompt,
+            )
+            if generated_image:
+                resolved_persona_data["image"] = generated_image
+                logger.info(
+                    f"Generated image URL for "
+                    f"'{persona_name_for_logging}': {generated_image}"
                 )
-
-                if generated_image:
-                    resolved_persona_data["image"] = generated_image
-                    logger.info(f"Generated image URL for '{persona_name_for_logging}': {generated_image}")
-                else:
-                    logger.warning(f"Image generation returned no URL.")
-                    resolved_persona_data["image"] = None # Ensure no invalid image data is stored
-            except Exception as e:
-                logger.error(f"Failed to generate image for '{persona_name_for_logging}': {e}")
+            else:
+                logger.warning("Image generation returned no URL.")
+                resolved_persona_data["image"] = None
+        except Exception as e:
+            logger.error(
+                f"Failed to generate image for "
+                f"'{persona_name_for_logging}': {e}"
+            )
 
     # Populate voice ID if not present
     if not resolved_persona_data.get("cartesia_voice_id"):
@@ -235,43 +258,34 @@ async def join_meeting(request: BotRequest, client_request: Request):
             except Exception as e:
                 logger.error(f"Error converting persona image from resolved persona data to string: {e}")
                 bot_image = None
-        # Only attempt to generate image if custom prompt was originally used AND details were derived
         elif request.prompt and prompt_derived_details:
-            logger.info("Attempting to generate image based on custom LLM prompt derived details...")
-            # Use details from prompt_derived_details to create a PersonaImageRequest
+            logger.info(
+                "Generating image from prompt-derived details…"
+            )
             try:
-                # Use derived details, falling back to defaults or original prompt where needed
-                image_request_data = PersonaImageRequest(
-                    name=prompt_derived_details.get("name", "Bot"), 
-                    description=prompt_derived_details.get("description", request.prompt), 
-                    gender=prompt_derived_details.get("gender", "male"), 
-                    characteristics=prompt_derived_details.get("characteristics", [])
+                image_prompt = _build_image_prompt(
+                    prompt_derived_details
                 )
-                # Construct a more detailed prompt for the image service if possible
-                image_prompt_desc = image_request_data.description
-                if image_request_data.gender:
-                   image_prompt_desc = f"{image_request_data.gender.capitalize()}. {image_prompt_desc}"
-                if image_request_data.characteristics:
-                   traits = ", ".join(image_request_data.characteristics)
-                   image_prompt_desc = f"{image_prompt_desc}. With features like {traits}"
-
-                # Add standard quality guidelines
-                image_prompt_desc += ". High quality, single person, only face and shoulders, centered, neutral background, avoid borders."
-
-                generated_image_url = await image_service.generate_persona_image(
-                    name=image_request_data.name,
-                    prompt=image_prompt_desc, 
-                    style="realistic", 
-                    size=(512, 512) 
+                generated_image_url = (
+                    await image_service.generate_persona_image(
+                        name=prompt_derived_details.get("name", "Bot"),
+                        prompt=image_prompt,
+                    )
                 )
                 if generated_image_url:
                     bot_image = generated_image_url
                     logger.info(f"Generated image: {bot_image}")
                 else:
-                    logger.error(f"Failed to generate image from prompt derived details: No URL returned.")
+                    logger.warning(
+                        "Image generation from derived details "
+                        "returned no URL."
+                    )
                     bot_image = None
             except Exception as e:
-                logger.error(f"Failed to generate image from prompt derived details: {e}")
+                logger.error(
+                    f"Failed to generate image from derived "
+                    f"details: {e}"
+                )
                 bot_image = None
 
     # Ensure the bot_image is definitely a string or None before passing to 'create_meeting_bot
