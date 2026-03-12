@@ -58,6 +58,9 @@ import os
 
 INTERNAL_PORT = os.getenv("PORT", "7014")
 
+# Tracks clients whose greeting has already been triggered (avoids duplicate triggers)
+_GREETING_TRIGGERED: set[str] = set()
+
 
 def _to_absolute_url(image_path: str, websocket_url: str) -> str:
     """Convert a local /static/... path to a full HTTP URL using the server base."""
@@ -662,6 +665,13 @@ def _maybe_start_pipecat(meetingbaas_bot_id: str) -> None:
         )
         return
 
+    if client_id in _GREETING_TRIGGERED:
+        logger.info(
+            f"[webhook] Greeting already triggered for "
+            f"{client_id}, skipping"
+        )
+        return
+
     if client_id in PIPECAT_PROCESSES:
         proc = PIPECAT_PROCESSES[client_id]
         if proc.poll() is None:
@@ -670,6 +680,7 @@ def _maybe_start_pipecat(meetingbaas_bot_id: str) -> None:
                 f"{client_id}, triggering greeting"
             )
             trigger_greeting(client_id)
+            _GREETING_TRIGGERED.add(client_id)
             PENDING_PIPECAT_PARAMS.pop(client_id, None)
             return
         else:
@@ -688,6 +699,7 @@ def _maybe_start_pipecat(meetingbaas_bot_id: str) -> None:
     )
     PIPECAT_PROCESSES[client_id] = process
     trigger_greeting(client_id)
+    _GREETING_TRIGGERED.add(client_id)
     logger.info(
         f"[webhook] Started Pipecat for bot "
         f"{meetingbaas_bot_id} (client {client_id})"
@@ -701,6 +713,7 @@ def _cleanup_bot(meetingbaas_bot_id: str) -> None:
         return
 
     PENDING_PIPECAT_PARAMS.pop(client_id, None)
+    _GREETING_TRIGGERED.discard(client_id)
     cleanup_greeting_trigger(client_id)
 
     if client_id in PIPECAT_PROCESSES:
