@@ -212,6 +212,7 @@ async def main(
     tts = CartesiaTTSService(
         api_key=os.getenv("CARTESIA_API_KEY"),
         voice_id=voice_id,
+        model="sonic-3",
         sample_rate=output_sample_rate,
         speed="normal",
     )
