@@ -46,26 +46,39 @@ The project follows a streamlined API-first approach with:
    - Health check endpoint
    - Returns: `{"message": "MeetingBaas Bot API is running"}`
 
-2. Run Bots (`POST /run-bots`):
+2. Create Bot (`POST /bots`):
 
-   ```json
-   {
-     "meeting_url": "https://meet.google.com/xxx-yyyy-zzz",
-     "personas": ["interviewer"],
-     "meeting_baas_api_key": "your-api-key",
-     "bot_image": "https://example.com/avatar.jpg",
-     "entry_message": "Hello, I'm here to help!"
-   }
+   ```bash
+   curl -X POST "http://localhost:${PORT}/bots" \
+     -H "Content-Type: application/json" \
+     -H "x-meeting-baas-api-key: ${MEETING_BAAS_API_KEY}" \
+     -d '{
+       "meeting_url": "https://meet.google.com/xxx-yyyy-zzz",
+       "personas": ["interviewer"]
+     }'
    ```
 
-   - Required fields: `meeting_url` and `meeting_baas_api_key`
+   - Required header: `x-meeting-baas-api-key`
+   - Required field: `meeting_url`
+   - Optional fields: `personas`, `bot_name`, `bot_image`, `entry_message`, `extra`, `enable_tools`, `prompt`
    - The WebSocket URL is determined automatically (see WebSocket URL Resolution below)
-   - Returns: MeetingBaas bot ID and client ID for WebSocket connections
+   - Returns: MeetingBaas bot ID
 
-3. WebSocket endpoint (`/ws/{client_id}`):
+3. Remove Bot (`DELETE /bots/{bot_id}`):
+
+   ```bash
+   curl -X DELETE "http://localhost:${PORT}/bots/{bot_id}" \
+     -H "Content-Type: application/json" \
+     -H "x-meeting-baas-api-key: ${MEETING_BAAS_API_KEY}" \
+     -d '{}'
+   ```
+
+   - Removes the bot from the meeting and cleans up resources
+
+4. WebSocket endpoint (`/ws/{client_id}`):
    - Real-time communication channel for audio streaming
    - Binary audio data and control messages
-4. Pipecat WebSocket endpoint (`/pipecat/{client_id}`):
+5. Pipecat WebSocket endpoint (`/pipecat/{client_id}`):
    - Connection point for Pipecat services
    - Bidirectional conversion between raw audio and Protobuf frames
 
@@ -221,6 +234,7 @@ Example `.env` file:
 
 ```
 MEETING_BAAS_API_KEY=your_api_key_here
+PORT=7014
 BASE_URL=https://your-server-domain.com  # For production
 ```
 
@@ -284,28 +298,27 @@ The local development mode simplifies WebSocket setup by:
 
 ### Creating Bots via API
 
-The WebSocket URL is optional in all cases. The server determines the appropriate URL based on the priority list described in the [WebSocket URL Resolution](#websocket-url-resolution) section:
+The API key must be passed via the `x-meeting-baas-api-key` header. The WebSocket URL is resolved automatically by the server based on the priority list described in the [WebSocket URL Resolution](#websocket-url-resolution) section:
 
 ```bash
-curl -X POST http://localhost:${PORT}/run-bots \
+curl -X POST "http://localhost:${PORT}/bots" \
   -H "Content-Type: application/json" \
+  -H "x-meeting-baas-api-key: ${MEETING_BAAS_API_KEY}" \
   -d '{
     "meeting_url": "https://meet.google.com/xxx-yyyy-zzz",
-    "personas": ["interviewer"],
-    "meeting_baas_api_key": "your-api-key"
+    "personas": ["interviewer"]
   }'
 ```
 
-You can still manually specify a WebSocket URL if needed:
+You can also use a custom prompt instead of a pre-defined persona:
 
 ```bash
-curl -X POST http://localhost:${PORT}/run-bots \
+curl -X POST "http://localhost:${PORT}/bots" \
   -H "Content-Type: application/json" \
+  -H "x-meeting-baas-api-key: ${MEETING_BAAS_API_KEY}" \
   -d '{
     "meeting_url": "https://meet.google.com/xxx-yyyy-zzz",
-    "personas": ["interviewer"],
-    "websocket_url": "ws://your-custom-websocket-url:${PORT}",
-    "meeting_baas_api_key": "your-api-key"
+    "prompt": "You are a helpful meeting assistant that keeps discussions on track."
   }'
 ```
 
@@ -403,21 +416,19 @@ The API has been completely redesigned for simplicity and reliability:
 The direct API integration provides several benefits:
 
 ```python
-# Direct API call to MeetingBaas
 meetingbaas_bot_id = create_meeting_bot(
     meeting_url=request.meeting_url,
-    websocket_url=websocket_url,  # Determined by the server via multiple methods
+    websocket_url=websocket_url,
     bot_id=bot_client_id,
     persona_name=persona_name,
-    api_key=request.meeting_baas_api_key,
-    # Additional parameters
+    api_key=api_key,  # From x-meeting-baas-api-key header
     bot_image=request.bot_image,
     entry_message=request.entry_message,
     extra=request.extra,
 )
 ```
 
-This approach eliminates the complexity of subprocess management, provides immediate feedback on bot creation, and returns both the MeetingBaas bot ID and client ID for WebSocket connections.
+This approach eliminates the complexity of subprocess management, provides immediate feedback on bot creation, and returns the MeetingBaas bot ID.
 
 ### Production Deployment
 
