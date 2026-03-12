@@ -26,6 +26,7 @@ _EXPERIENCE_BANDS = [
 ]
 
 _GENDERS = ["MALE", "FEMALE", "NON-BINARY"]
+_GENDER_WEIGHTS = [0.495, 0.495, 0.01]
 
 _PERSONALITY_SEEDS = [
     "tends to over-explain and go on tangents",
@@ -47,7 +48,7 @@ def _build_generation_prompt() -> tuple[str, Dict[str, Any]]:
     Returns the prompt string and a dict of the chosen seeds.
     """
     region = random.choice(_CULTURAL_REGIONS)
-    gender = random.choice(_GENDERS)
+    gender = random.choices(_GENDERS, weights=_GENDER_WEIGHTS, k=1)[0]
     band_label, min_yoe, max_yoe = random.choice(_EXPERIENCE_BANDS)
     personality = random.choice(_PERSONALITY_SEEDS)
 
@@ -205,7 +206,7 @@ def _fallback_random_profile() -> Dict[str, Any]:
         "Reyes", "Fitzgerald", "Chakraborty", "Nguyen", "Osei", "Müller", "Bianchi",
     ]
 
-    gender = random.choice(["MALE", "FEMALE", "NON-BINARY"])
+    gender = random.choices(_GENDERS, weights=_GENDER_WEIGHTS, k=1)[0]
     first_name = random.choice(
         first_names_male if gender == "MALE" else first_names_female if gender == "FEMALE" else first_names_nb
     )

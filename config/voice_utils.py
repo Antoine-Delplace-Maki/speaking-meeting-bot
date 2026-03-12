@@ -100,6 +100,8 @@ And these available voices:
 Which voice number (1-{len(voices)}) would be the most appropriate match? 
 Respond with ONLY the number."""
 
+            logger.info(f"Voice matching prompt for '{persona['name']}': {prompt}")
+
             response = self.client.chat.completions.create(
                 model="gpt-4.1-mini",
                 messages=[{"role": "user", "content": prompt}],

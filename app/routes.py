@@ -90,7 +90,7 @@ def _build_image_prompt(persona: dict) -> str:
 
     if persona.get("is_randomized_candidate"):
         import random as _rng
-        gender_word = gender.lower() if gender and gender.lower() != "non-binary" else "person"
+        gender_word = gender.lower() if gender else "person"
         age = persona.get("age", "late twenties")
         cultural_bg = persona.get("cultural_background", "")
 

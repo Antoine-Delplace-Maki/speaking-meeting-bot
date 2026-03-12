@@ -47,15 +47,12 @@ class ImageService:
         locally under ``static/avatars/`` and the returned string is a
         relative URL path (e.g. ``/static/avatars/<id>.jpg``) that the
         caller must combine with the server's external base URL.
-
-        Falls back to dall-e-3 (which returns a temporary OpenAI URL)
-        if gpt-image-1 is unavailable.
         """
         if not self._enabled:
             logger.debug("Skipping image generation (not configured)")
             return ""
 
-        dall_e_size = _pick_size(size)
+        image_size = _pick_size(size)
 
         if raw_prompt:
             full_prompt = prompt
@@ -72,7 +69,7 @@ class ImageService:
 
         logger.info(
             f"Generating image via gpt-image-1 "
-            f"(size={dall_e_size}, prompt={len(full_prompt)} chars)"
+            f"(size={image_size}, prompt={len(full_prompt)} chars)"
         )
 
         try:
@@ -80,7 +77,7 @@ class ImageService:
                 self._client.images.generate,
                 model="gpt-image-1",
                 prompt=full_prompt,
-                size=dall_e_size,
+                size=image_size,
                 quality="medium",
                 output_format="jpeg",
                 output_compression=80,
@@ -102,26 +99,7 @@ class ImageService:
             return ""
 
         except Exception as e:
-            logger.error(f"gpt-image-1 failed: {e}, falling back to dall-e-3")
-            return await self._fallback_dalle3(name, full_prompt, dall_e_size)
-
-    async def _fallback_dalle3(
-        self, name: str, prompt: str, size: str
-    ) -> str:
-        try:
-            response = await asyncio.to_thread(
-                self._client.images.generate,
-                model="dall-e-3",
-                prompt=prompt,
-                size=size,
-                quality="standard",
-                n=1,
-            )
-            image_url = response.data[0].url
-            logger.info(f"Fallback image generated for '{name}': {image_url[:80]}...")
-            return image_url
-        except Exception as e:
-            logger.error(f"dall-e-3 fallback also failed: {e}")
+            logger.error(f"gpt-image-1 failed: {e}")
             return ""
 
 
