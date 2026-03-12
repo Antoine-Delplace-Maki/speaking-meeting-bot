@@ -21,7 +21,7 @@ from pipecat.services.deepgram.stt import DeepgramSTTService
 
 # from pipecat.services.gladia.stt import GladiaSTTService
 from pipecat.services.openai.llm import OpenAILLMService
-from pipecat.transports.network.websocket_client import (
+from pipecat.transports.websocket.client import (
     WebsocketClientParams,
     WebsocketClientTransport,
 )

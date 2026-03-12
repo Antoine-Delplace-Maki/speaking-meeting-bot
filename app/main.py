@@ -21,7 +21,7 @@ logger = configure_logger()
 logger.name = "meetingbaas-api"  # Set logger name after configuring
 
 # Set logging level for pipecat WebSocket client to WARNING to reduce noise
-pipecat_ws_logger = logging.getLogger("pipecat.transports.network.websocket_client")
+pipecat_ws_logger = logging.getLogger("pipecat.transports.websocket.client")
 pipecat_ws_logger.setLevel(logging.WARNING)
 
 
