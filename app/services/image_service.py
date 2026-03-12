@@ -3,7 +3,7 @@
 import asyncio
 import base64
 import os
-import tempfile
+import uuid
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -13,6 +13,8 @@ from openai import OpenAI
 load_dotenv()
 
 _MAX_PROMPT_LENGTH = 4000
+_AVATARS_DIR = Path(__file__).resolve().parents[2] / "static" / "avatars"
+_AVATARS_DIR.mkdir(parents=True, exist_ok=True)
 
 
 class ImageService:
@@ -39,20 +41,15 @@ class ImageService:
         size: tuple[int, int] = (1024, 1024),
         raw_prompt: bool = False,
     ) -> str:
-        """Generate a persona image and return its URL.
+        """Generate a persona image and return a serveable path.
 
-        Uses gpt-image-1 for photorealistic output. Falls back to
-        dall-e-3 if gpt-image-1 is unavailable.
+        Uses gpt-image-1 for photorealistic output. The image is saved
+        locally under ``static/avatars/`` and the returned string is a
+        relative URL path (e.g. ``/static/avatars/<id>.jpg``) that the
+        caller must combine with the server's external base URL.
 
-        Args:
-            name: Persona display name.
-            prompt: Description of the desired image.
-            style: Artistic style hint (ignored when raw_prompt=True).
-            size: Desired dimensions.
-            raw_prompt: If True, use prompt as-is without wrapping.
-
-        Returns:
-            A URL pointing to the generated image, or empty string on failure.
+        Falls back to dall-e-3 (which returns a temporary OpenAI URL)
+        if gpt-image-1 is unavailable.
         """
         if not self._enabled:
             logger.debug("Skipping image generation (not configured)")
@@ -85,7 +82,8 @@ class ImageService:
                 prompt=full_prompt,
                 size=dall_e_size,
                 quality="medium",
-                output_format="png",
+                output_format="jpeg",
+                output_compression=80,
             )
 
             image_b64 = getattr(response.data[0], "b64_json", None)
@@ -96,9 +94,9 @@ class ImageService:
                 return image_url
 
             if image_b64:
-                data_uri = f"data:image/png;base64,{image_b64}"
-                logger.info(f"Image generated for '{name}' (base64, {len(image_b64)} chars)")
-                return data_uri
+                path = _save_b64_to_file(image_b64, ext="jpg")
+                logger.info(f"Image generated for '{name}': {path}")
+                return path
 
             logger.warning("gpt-image-1 returned no image data")
             return ""
@@ -110,7 +108,6 @@ class ImageService:
     async def _fallback_dalle3(
         self, name: str, prompt: str, size: str
     ) -> str:
-        """Fallback to DALL-E 3 if gpt-image-1 is unavailable."""
         try:
             response = await asyncio.to_thread(
                 self._client.images.generate,
@@ -128,8 +125,15 @@ class ImageService:
             return ""
 
 
+def _save_b64_to_file(b64_data: str, ext: str = "jpg") -> str:
+    """Decode base64 image data, save to static/avatars/, return the URL path."""
+    filename = f"{uuid.uuid4().hex}.{ext}"
+    filepath = _AVATARS_DIR / filename
+    filepath.write_bytes(base64.b64decode(b64_data))
+    return f"/static/avatars/{filename}"
+
+
 def _pick_size(size: tuple[int, int]) -> str:
-    """Map an arbitrary (w, h) to the closest supported size string."""
     w, h = size
     ratio = w / h if h else 1.0
     if ratio > 1.3:

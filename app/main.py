@@ -10,6 +10,7 @@ from fastapi import FastAPI, Request, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.openapi.utils import get_openapi
 from fastapi.responses import JSONResponse
+from fastapi.staticfiles import StaticFiles
 
 from app.routes import router as app_router
 from app.websockets import websocket_router
@@ -28,11 +29,13 @@ pipecat_ws_logger.setLevel(logging.WARNING)
 _AUTH_SKIP_PATHS = frozenset(
     ["/docs", "/openapi.json", "/redoc", "/health", "/webhook"]
 )
+_AUTH_SKIP_PREFIXES = ("/static/",)
 
 
 async def api_key_middleware(request: Request, call_next):
     """Middleware to check for MeetingBaas API key in headers."""
-    if request.url.path in _AUTH_SKIP_PATHS:
+    path = request.url.path
+    if path in _AUTH_SKIP_PATHS or path.startswith(_AUTH_SKIP_PREFIXES):
         return await call_next(request)
 
     api_key = request.headers.get("x-meeting-baas-api-key")
@@ -182,6 +185,12 @@ def create_app() -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
+
+    # Serve generated avatar images
+    from pathlib import Path
+    _static_dir = Path(__file__).resolve().parents[1] / "static"
+    _static_dir.mkdir(exist_ok=True)
+    app.mount("/static", StaticFiles(directory=str(_static_dir)), name="static")
 
     # Include the routers
     app.include_router(app_router)

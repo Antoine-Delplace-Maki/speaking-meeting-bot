@@ -53,6 +53,18 @@ import os
 
 INTERNAL_PORT = os.getenv("PORT", "7014")
 
+
+def _to_absolute_url(image_path: str, websocket_url: str) -> str:
+    """Convert a local /static/... path to a full HTTP URL using the server base."""
+    if not image_path or not image_path.startswith("/static/"):
+        return image_path
+    base = websocket_url
+    if base.startswith("wss://"):
+        base = "https://" + base[6:]
+    elif base.startswith("ws://"):
+        base = "http://" + base[5:]
+    return base.rstrip("/") + image_path
+
 router = APIRouter()
 
 
@@ -327,12 +339,13 @@ async def join_meeting(request: BotRequest, client_request: Request):
                 )
                 bot_image = None
 
-    # Ensure the bot_image is definitely a string or None before passing to 'create_meeting_bot
+    # Convert local /static/ paths to full external URLs
     bot_image_str = str(bot_image) if bot_image is not None else None
-    if bot_image_str is not None:
-         logger.info(f"Final bot image URL: {bot_image_str}")
+    if bot_image_str:
+        bot_image_str = _to_absolute_url(bot_image_str, websocket_url)
+        logger.info(f"Final bot image URL: {bot_image_str}")
     else:
-         logger.info("No bot image URL resolved.")
+        logger.info("No bot image URL resolved.")
 
     # Determine the final entry message
     final_entry_message: Optional[str] = request.entry_message
