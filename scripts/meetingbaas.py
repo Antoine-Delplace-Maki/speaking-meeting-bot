@@ -323,32 +323,19 @@ async def main(
     task = PipelineTask(pipeline, params=PipelineParams(allow_interruptions=True, check_dangling_tasks=True))
     runner = PipelineRunner()
 
-    # Add a simple test to verify TTS is working
-    async def test_tts_output():
-        log_and_flush(logging.INFO, "[TEST] Testing TTS output directly")
-        try:
-            # Try to generate some test audio
-            test_text = "Testing TTS output"
-            log_and_flush(logging.INFO, f"[TEST] Generating TTS for: {test_text}")
-            # We'll let the pipeline handle this rather than calling TTS directly
-            await task.queue_frames([TextFrame(test_text)])
-            log_and_flush(logging.INFO, "[TEST] Test TTS frame queued")
-        except Exception as e:
-            log_and_flush(logging.ERROR, f"[TEST] TTS test failed: {e}")
-
     if entry_message:
         log_and_flush(logging.INFO, "[BOT] Bot will speak first with an introduction")
         initial_message = {"role": "user", "content": entry_message}
         async def queue_initial_message():
-            log_and_flush(logging.INFO, "[BOT] Waiting 2 seconds before sending initial message")
-            await asyncio.sleep(2)
+            delay = 15
+            log_and_flush(
+                logging.INFO,
+                f"[BOT] Waiting {delay}s for MeetingBaas client to connect before greeting",
+            )
+            await asyncio.sleep(delay)
             log_and_flush(logging.INFO, f"[BOT] Queuing initial message: {initial_message}")
             await task.queue_frames([LLMMessagesUpdateFrame(messages=[initial_message], run_llm=True)])
             log_and_flush(logging.INFO, "[BOT] Initial greeting message queued successfully")
-            
-            # Also queue a simple TTS test
-            await asyncio.sleep(1)
-            await test_tts_output()
         asyncio.create_task(queue_initial_message())
     else:
         log_and_flush(logging.INFO, "[BOT] No entry message configured")

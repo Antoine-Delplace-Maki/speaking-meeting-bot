@@ -154,13 +154,21 @@ async def pipecat_websocket(websocket: WebSocket, client_id: str):
     await registry.connect(websocket, client_id, is_pipecat=True)
     try:
         while True:
-            message = await websocket.receive()
+            try:
+                message = await websocket.receive()
+            except RuntimeError as e:
+                if "disconnect" in str(e).lower():
+                    logger.info(
+                        f"Pipecat WebSocket for client {client_id} closed."
+                    )
+                    break
+                raise
+
             if "bytes" in message:
                 data = message["bytes"]
                 logger.debug(
                     f"Received binary data ({len(data)} bytes) from Pipecat client {client_id}"
                 )
-                # Forward Pipecat messages to client with conversion
                 await message_router.send_from_pipecat(data, client_id)
             elif "text" in message:
                 data = message["text"]

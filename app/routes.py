@@ -85,7 +85,9 @@ async def join_meeting(request: BotRequest, client_request: Request):
 
     logger.info(f"Starting bot for meeting {request.meeting_url}")
     logger.info(f"WebSocket URL: {websocket_url}")
-    logger.info(f"Bot name: {request.bot_name}")
+    logger.info(
+        f"Bot name: {request.bot_name or '(empty, will resolve from persona)'}"
+    )
 
     # INTERNAL PARAMETER: Set a fixed value for streaming_audio_frequency
     # This is not exposed in the API and is always "16khz"

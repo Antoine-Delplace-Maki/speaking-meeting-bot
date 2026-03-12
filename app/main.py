@@ -25,10 +25,12 @@ pipecat_ws_logger = logging.getLogger("pipecat.transports.websocket.client")
 pipecat_ws_logger.setLevel(logging.WARNING)
 
 
+_AUTH_SKIP_PATHS = frozenset(["/docs", "/openapi.json", "/redoc", "/health"])
+
+
 async def api_key_middleware(request: Request, call_next):
     """Middleware to check for MeetingBaas API key in headers."""
-    # Skip API key check for docs and openapi endpoints
-    if request.url.path in ["/docs", "/openapi.json", "/redoc"]:
+    if request.url.path in _AUTH_SKIP_PATHS:
         return await call_next(request)
 
     api_key = request.headers.get("x-meeting-baas-api-key")

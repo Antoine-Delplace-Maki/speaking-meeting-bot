@@ -1,8 +1,12 @@
 """Routes messages between clients and Pipecat."""
 
+import time
+
 from core.connection import registry
 from core.converter import converter
 from meetingbaas_pipecat.utils.logger import logger
+
+_LOG_INTERVAL_SECONDS = 5
 
 
 class MessageRouter:
@@ -12,7 +16,12 @@ class MessageRouter:
         self.registry = registry
         self.converter = converter
         self.logger = logger
-        self.closing_clients = set()  # Track clients that are in the process of closing
+        self.closing_clients = set()
+        self._to_pipecat_count: dict[str, int] = {}
+        self._from_pipecat_count: dict[str, int] = {}
+        self._to_pipecat_bytes: dict[str, int] = {}
+        self._from_pipecat_bytes: dict[str, int] = {}
+        self._last_log_time: dict[str, float] = {}
 
     def mark_closing(self, client_id: str):
         """Mark a client as closing to prevent sending more data to it."""
@@ -59,6 +68,29 @@ class MessageRouter:
                 except Exception as e:
                     self.logger.debug(f"Error broadcasting to client {client_id}: {e}")
 
+    def _maybe_log_audio_stats(self, client_id: str):
+        """Log periodic audio flow stats at INFO level."""
+        now = time.monotonic()
+        last = self._last_log_time.get(client_id, 0.0)
+        if now - last < _LOG_INTERVAL_SECONDS:
+            return
+        self._last_log_time[client_id] = now
+
+        to_cnt = self._to_pipecat_count.get(client_id, 0)
+        from_cnt = self._from_pipecat_count.get(client_id, 0)
+        to_bytes = self._to_pipecat_bytes.get(client_id, 0)
+        from_bytes = self._from_pipecat_bytes.get(client_id, 0)
+
+        self.logger.info(
+            f"[AUDIO] client={client_id[:8]}… "
+            f"→pipecat: {to_cnt} frames ({to_bytes} B) "
+            f"←pipecat: {from_cnt} frames ({from_bytes} B)"
+        )
+        self._to_pipecat_count[client_id] = 0
+        self._from_pipecat_count[client_id] = 0
+        self._to_pipecat_bytes[client_id] = 0
+        self._from_pipecat_bytes[client_id] = 0
+
     async def send_to_pipecat(self, message: bytes, client_id: str):
         """Convert raw audio to Protobuf frame and send to Pipecat."""
         if client_id in self.closing_clients:
@@ -72,11 +104,14 @@ class MessageRouter:
             try:
                 serialized_frame = self.converter.raw_to_protobuf(message)
                 await pipecat.send_bytes(serialized_frame)
-                self.logger.debug(
-                    f"Forwarded audio frame ({len(message)} bytes) to Pipecat for client {client_id}"
+                self._to_pipecat_count[client_id] = (
+                    self._to_pipecat_count.get(client_id, 0) + 1
                 )
+                self._to_pipecat_bytes[client_id] = (
+                    self._to_pipecat_bytes.get(client_id, 0) + len(message)
+                )
+                self._maybe_log_audio_stats(client_id)
             except Exception as e:
-                # Check for connection closed errors specifically
                 if "close" in str(e).lower() or "closed" in str(e).lower():
                     self.logger.debug(
                         f"Connection closed when sending to Pipecat for client {client_id}: {e}"
@@ -84,6 +119,10 @@ class MessageRouter:
                     self.mark_closing(client_id)
                 else:
                     self.logger.error(f"Error sending to Pipecat: {str(e)}")
+        else:
+            self.logger.warning(
+                f"No Pipecat connection for client {client_id[:8]}… — dropping audio"
+            )
 
     async def send_from_pipecat(self, message: bytes, client_id: str):
         """Extract audio from Protobuf frame and send to client."""
@@ -99,11 +138,15 @@ class MessageRouter:
                 audio_data = self.converter.protobuf_to_raw(message)
                 if audio_data:
                     await client.send_bytes(audio_data)
-                    self.logger.debug(
-                        f"Forwarded audio ({len(audio_data)} bytes) from Pipecat to client {client_id}"
+                    self._from_pipecat_count[client_id] = (
+                        self._from_pipecat_count.get(client_id, 0) + 1
                     )
+                    self._from_pipecat_bytes[client_id] = (
+                        self._from_pipecat_bytes.get(client_id, 0)
+                        + len(audio_data)
+                    )
+                    self._maybe_log_audio_stats(client_id)
             except Exception as e:
-                # Check for connection closed errors specifically
                 if "close" in str(e).lower() or "closed" in str(e).lower():
                     self.logger.debug(
                         f"Connection closed when sending to client {client_id}: {e}"
@@ -111,6 +154,10 @@ class MessageRouter:
                     self.mark_closing(client_id)
                 else:
                     self.logger.error(f"Error processing Pipecat message: {str(e)}")
+        else:
+            self.logger.warning(
+                f"No client connection for {client_id[:8]}… — dropping Pipecat audio"
+            )
 
 
 # Create a singleton instance

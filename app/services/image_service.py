@@ -17,22 +17,46 @@ import asyncio
 # Load environment variables
 load_dotenv()
 
+_PLACEHOLDER_VALUES = frozenset([
+    "", "your_replicate_key_here", "your_utfs_key_here", "your_app_id_here",
+])
+
+
 class ImageService:
     """Service for handling image generation and processing."""
-    
+
     def __init__(self):
         """Initialize the image service."""
-        self.uploader = UTFSUploader(
-            api_key=os.getenv("UTFS_KEY"),
-            app_id=os.getenv("APP_ID")
-        )
-        # Set Replicate API token
-        # Replicate API tokens shouldn't include the "sk_live_" prefix
         self.replicate_key = os.getenv("REPLICATE_KEY", "")
         if self.replicate_key.startswith("sk_live_"):
-            self.replicate_key = self.replicate_key.replace("sk_live_", "")
+            self.replicate_key = self.replicate_key.replace(
+                "sk_live_", ""
+            )
         os.environ["REPLICATE_API_TOKEN"] = self.replicate_key
-        logger.info("Initialized Replicate client and UTFSUploader for image generation")
+
+        utfs_key = os.getenv("UTFS_KEY", "")
+        app_id = os.getenv("APP_ID", "")
+
+        self._enabled = (
+            self.replicate_key not in _PLACEHOLDER_VALUES
+            and utfs_key not in _PLACEHOLDER_VALUES
+            and app_id not in _PLACEHOLDER_VALUES
+        )
+
+        if self._enabled:
+            self.uploader = UTFSUploader(
+                api_key=utfs_key, app_id=app_id
+            )
+            logger.info(
+                "Initialized Replicate client and UTFSUploader "
+                "for image generation"
+            )
+        else:
+            self.uploader = None
+            logger.warning(
+                "Image generation disabled — REPLICATE_KEY, "
+                "UTFS_KEY, or APP_ID not configured"
+            )
     
     async def generate_persona_image(
         self,
@@ -42,8 +66,11 @@ class ImageService:
         size: tuple[int, int] = (512, 512)
         ) -> str:
 
+        if not self._enabled:
+            logger.debug("Skipping image generation (not configured)")
+            return ""
+
         try:
-            # Add style to prompt
             full_prompt = f"{style} style, {prompt}"
 
             logger.info(f"Generating image with prompt: {full_prompt}")
