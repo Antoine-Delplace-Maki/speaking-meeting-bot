@@ -11,16 +11,60 @@ from openai import OpenAI
 
 load_dotenv()
 
-CANDIDATE_GENERATION_PROMPT = """Generate a realistic fictional job candidate profile for a tech interview simulation.
-The candidate should be diverse and unique. Randomize everything: background, ethnicity, gender, experience level, tech stack.
+_CULTURAL_REGIONS = [
+    "East Asian", "South Asian", "Southeast Asian", "Middle Eastern",
+    "West African", "East African", "North African",
+    "Western European", "Eastern European", "Scandinavian",
+    "Latin American", "Caribbean", "Pacific Islander",
+    "Indigenous Australian", "Central Asian",
+]
+
+_EXPERIENCE_BANDS = [
+    ("junior", 1, 3),
+    ("mid-level", 3, 6),
+    ("senior", 6, 10),
+]
+
+_GENDERS = ["MALE", "FEMALE", "NON-BINARY"]
+
+_PERSONALITY_SEEDS = [
+    "tends to over-explain and go on tangents",
+    "very concise and direct, almost blunt",
+    "uses lots of real-world analogies",
+    "asks many clarifying questions before answering",
+    "self-deprecates with dry humor",
+    "gets visibly excited about technical topics",
+    "speaks slowly and deliberately, choosing words carefully",
+    "nervous energy, talks fast when excited",
+    "quietly confident, understates achievements",
+    "very structured thinker, organizes answers methodically",
+]
+
+
+def _build_generation_prompt() -> str:
+    """Build the candidate generation prompt with random seed constraints."""
+    region = random.choice(_CULTURAL_REGIONS)
+    gender = random.choice(_GENDERS)
+    band_label, min_yoe, max_yoe = random.choice(_EXPERIENCE_BANDS)
+    personality = random.choice(_PERSONALITY_SEEDS)
+
+    return f"""Generate a realistic fictional job candidate profile for a tech interview simulation.
+
+CONSTRAINTS (you MUST follow these):
+- Cultural background: {region}
+- Gender: {gender}
+- Experience level: {band_label} ({min_yoe}-{max_yoe} years)
+- Personality trait during interviews: {personality}
+
+Pick a first name that is authentic to the cultural background above.
 
 Return a JSON object with these exact fields:
-- "name": a realistic first name (vary cultural backgrounds widely)
-- "age": number between 22 and 38
-- "gender": one of "MALE", "FEMALE", "NON-BINARY"
+- "name": a realistic first name matching the cultural background
+- "age": number between 22 and 38 (consistent with experience level)
+- "gender": "{gender}"
 - "degree": their degree (e.g. "Bachelor's in Software Engineering", "Master's in Computer Science")
 - "university_description": a vague description, NOT a real university name (e.g. "a well-known state university", "a small liberal arts college")
-- "years_experience": number between 1 and 10
+- "years_experience": number between {min_yoe} and {max_yoe}
 - "previous_role": their most recent job title (e.g. "full-stack developer", "data engineer", "DevOps engineer")
 - "previous_company_type": type of company (e.g. "a fast-growing fintech startup", "a large enterprise software company")
 - "reason_for_leaving": brief reason they left
@@ -29,7 +73,7 @@ Return a JSON object with these exact fields:
 - "databases_and_tools": list of 3-5 technologies (databases, tools, platforms)
 - "passionate_about": list of 1-2 technical topics they get excited about
 - "weakness": a realistic professional weakness
-- "personality_trait": one distinctive interview behavior (e.g. "tends to over-explain", "very concise and direct", "uses lots of analogies")
+- "personality_trait": "{personality}"
 
 Return ONLY valid JSON, no markdown fences or extra text."""
 
@@ -90,12 +134,15 @@ async def generate_random_candidate(base_persona: Dict[str, Any]) -> Dict[str, A
     """
     client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
+    prompt = _build_generation_prompt()
+    logger.info(f"Candidate generation prompt seeds: {prompt.split('CONSTRAINTS')[1].split('Pick')[0].strip()}")
+
     try:
         response = client.chat.completions.create(
             model="gpt-4.1-mini",
-            messages=[{"role": "user", "content": CANDIDATE_GENERATION_PROMPT}],
+            messages=[{"role": "user", "content": prompt}],
             max_tokens=500,
-            temperature=1.2,
+            temperature=1.0,
         )
 
         raw = response.choices[0].message.content.strip()
