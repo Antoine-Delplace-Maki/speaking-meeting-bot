@@ -157,9 +157,8 @@ And these available voices:
 Which voice number (1-{len(voices)}) would be the most appropriate match? 
 Respond with ONLY the number."""
 
-            # Get GPT-4o-mini's recommendation (128k context, faster and cheaper)
             response = self.client.chat.completions.create(
-                model="gpt-4o-mini",
+                model="gpt-4.1-mini",
                 messages=[{"role": "user", "content": prompt}],
                 max_tokens=10,
             )

@@ -219,10 +219,10 @@ async def main(
 
     llm = OpenAILLMService(
         api_key=os.getenv("OPENAI_API_KEY"),
-        model="gpt-4-turbo-preview",
+        model="gpt-4.1",
         run_in_parallel=False,
     )
-    log_and_flush(logging.INFO, f"[LLM] OpenAI LLM initialized with model=gpt-4-turbo-preview")
+    log_and_flush(logging.INFO, "[LLM] OpenAI LLM initialized with model=gpt-4.1")
 
     if enable_tools:
         log_and_flush(logging.INFO, "[TOOLS] Registering function tools")
