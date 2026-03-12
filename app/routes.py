@@ -37,6 +37,9 @@ from config.prompts import PERSONA_INTERACTION_INSTRUCTIONS
 
 # Import the new persona detail extraction service
 from app.services.persona_detail_extraction import extract_persona_details_from_prompt
+import os
+
+INTERNAL_PORT = os.getenv("PORT", "7014")
 
 router = APIRouter()
 
@@ -314,7 +317,7 @@ async def join_meeting(request: BotRequest, client_request: Request):
 
         # Start the Pipecat process as a subprocess
         # The Pipecat process should connect to our LOCAL WebSocket server, not the external one
-        pipecat_websocket_url = f"ws://localhost:7014/pipecat/{bot_client_id}"
+        pipecat_websocket_url = f"ws://127.0.0.1:{INTERNAL_PORT}/pipecat/{bot_client_id}"
         process = start_pipecat_process(
             client_id=bot_client_id,
             websocket_url=pipecat_websocket_url,  # Use internal URL, not external

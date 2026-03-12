@@ -282,7 +282,7 @@ def start_server(host: str = "0.0.0.0", port: int = 7014, local_dev: bool = Fals
     ]
 
     if local_dev:
-        args.extend(["--reload"])
+        # args.extend(["--reload"])
 
         # Create a file that uvicorn will read on startup to set LOCAL_DEV_MODE
         with open(".local_dev_mode", "w") as f:
