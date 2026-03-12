@@ -102,17 +102,33 @@ def _build_image_prompt(persona: dict) -> str:
             "a casual blazer over a simple tee",
             "a flannel shirt",
             "a polo shirt",
+            "a denim jacket over a graphic tee",
+            "a V-neck sweater over a collared shirt",
+            "a simple black turtleneck",
+            "a vintage band t-shirt",
+            "a linen shirt with the top button undone",
         ])
         hair = _rng.choice([
-            "short cropped hair",
-            "shoulder-length wavy hair",
-            "a neat bun",
-            "curly natural hair",
-            "straight hair tucked behind one ear",
-            "a buzz cut",
-            "medium-length tousled hair",
-            "braids",
-            "long straight hair",
+            "short cropped dark hair",
+            "shoulder-length wavy brown hair",
+            "a neat top-knot bun",
+            "voluminous curly natural hair",
+            "straight auburn hair tucked behind one ear",
+            "a close buzz cut",
+            "medium-length tousled sandy blonde hair",
+            "long braids pulled to one side",
+            "long straight black hair with a middle part",
+            "a short afro",
+            "a slicked-back undercut",
+            "a messy pixie cut",
+            "thick wavy hair pushed back with a headband",
+            "dreadlocks tied back in a loose ponytail",
+            "a high curly ponytail",
+            "a short asymmetrical bob",
+            "tightly coiled natural hair cropped close",
+            "long loose waves with side-swept bangs",
+            "a faded taper with textured curls on top",
+            "a shaggy layered cut falling past the ears",
         ])
         room = _rng.choice([
             "a small bedroom with a bookshelf in the background",
@@ -122,6 +138,9 @@ def _build_image_prompt(persona: dict) -> str:
             "a cluttered desk in a college dorm room",
             "a minimalist room with a white wall and a single poster",
             "a cozy apartment with warm lamp light in the background",
+            "a bright room with large windows and natural daylight",
+            "a shared co-working space with blurred people behind",
+            "a café corner with exposed brick walls",
         ])
         expression = _rng.choice([
             "a natural, slightly nervous but friendly expression",
@@ -129,16 +148,17 @@ def _build_image_prompt(persona: dict) -> str:
             "a focused, attentive look with a slight smile",
             "a calm, composed expression with a hint of confidence",
             "a thoughtful look, mid-sentence",
+            "a genuine laugh, caught mid-chuckle",
+            "a curious, slightly raised eyebrow expression",
         ])
 
         return (
-            f"A candid webcam photograph of a person named {name}. "
-            f"They are a {cultural_bg + ' ' if cultural_bg else ''}{gender_word}, "
-            f"around {age} years old, with {hair}. "
-            f"Captured from a laptop webcam during a video interview. "
+            f"A candid webcam photograph of a {cultural_bg + ' ' if cultural_bg else ''}{gender_word}, "
+            f"around {age} years old. "
+            f"IMPORTANT — their distinctive appearance: they have {hair}, and are wearing {clothing}. "
             f"They are sitting in {room}. "
-            f"They are wearing {clothing}. "
             f"They have {expression} — like someone in a real job interview. "
+            f"Captured from a laptop webcam during a video interview. "
             f"The webcam angle is slightly above eye level, typical of a laptop camera. "
             f"Natural window light mixed with warm indoor lighting. "
             f"Skin texture, minor imperfections, and natural hair are visible. "
