@@ -334,7 +334,7 @@ async def main(
         }
 
         async def queue_initial_message():
-            delay = 5
+            delay = 1
             log_and_flush(
                 logging.INFO,
                 f"[BOT] Waiting {delay}s for transport "

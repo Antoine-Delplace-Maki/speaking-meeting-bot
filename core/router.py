@@ -22,6 +22,8 @@ class MessageRouter:
         self._to_pipecat_bytes: dict[str, int] = {}
         self._from_pipecat_bytes: dict[str, int] = {}
         self._last_log_time: dict[str, float] = {}
+        self._last_drop_log: dict[str, float] = {}
+        self._drop_count: dict[str, int] = {}
 
     def mark_closing(self, client_id: str):
         """Mark a client as closing to prevent sending more data to it."""
@@ -124,9 +126,19 @@ class MessageRouter:
                 else:
                     self.logger.error(f"Error sending to Pipecat: {str(e)}")
         else:
-            self.logger.warning(
-                f"No Pipecat connection for client {client_id[:8]}… — dropping audio"
+            self._drop_count[client_id] = (
+                self._drop_count.get(client_id, 0) + 1
             )
+            now = time.monotonic()
+            last = self._last_drop_log.get(client_id, 0.0)
+            if now - last >= _LOG_INTERVAL_SECONDS:
+                dropped = self._drop_count.pop(client_id, 0)
+                self._last_drop_log[client_id] = now
+                self.logger.warning(
+                    f"No Pipecat connection for client "
+                    f"{client_id[:8]}… — dropped "
+                    f"{dropped} audio frames"
+                )
 
     async def send_from_pipecat(self, message: bytes, client_id: str):
         """Extract audio from Protobuf frame and send to client."""
@@ -159,8 +171,9 @@ class MessageRouter:
                 else:
                     self.logger.error(f"Error processing Pipecat message: {str(e)}")
         else:
-            self.logger.warning(
-                f"No client connection for {client_id[:8]}… — dropping Pipecat audio"
+            self.logger.debug(
+                f"No client connection for "
+                f"{client_id[:8]}… — dropping Pipecat audio"
             )
 
 
