@@ -324,18 +324,42 @@ async def main(
     runner = PipelineRunner()
 
     if entry_message:
-        log_and_flush(logging.INFO, "[BOT] Bot will speak first with an introduction")
-        initial_message = {"role": "user", "content": entry_message}
+        log_and_flush(
+            logging.INFO,
+            "[BOT] Bot will speak first with an introduction",
+        )
+        initial_message = {
+            "role": "user",
+            "content": entry_message,
+        }
+
         async def queue_initial_message():
-            delay = 15
+            delay = 5
             log_and_flush(
                 logging.INFO,
-                f"[BOT] Waiting {delay}s for MeetingBaas client to connect before greeting",
+                f"[BOT] Waiting {delay}s for transport "
+                f"to connect before greeting",
             )
             await asyncio.sleep(delay)
-            log_and_flush(logging.INFO, f"[BOT] Queuing initial message: {initial_message}")
-            await task.queue_frames([LLMMessagesUpdateFrame(messages=[initial_message], run_llm=True)])
-            log_and_flush(logging.INFO, "[BOT] Initial greeting message queued successfully")
+            log_and_flush(
+                logging.INFO,
+                f"[BOT] Queuing initial message: "
+                f"{initial_message}",
+            )
+            await task.queue_frames(
+                [
+                    LLMMessagesUpdateFrame(
+                        messages=[initial_message],
+                        run_llm=True,
+                    )
+                ]
+            )
+            log_and_flush(
+                logging.INFO,
+                "[BOT] Initial greeting message queued "
+                "successfully",
+            )
+
         asyncio.create_task(queue_initial_message())
     else:
         log_and_flush(logging.INFO, "[BOT] No entry message configured")

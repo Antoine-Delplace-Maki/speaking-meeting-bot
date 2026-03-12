@@ -1,7 +1,7 @@
 """Connection management for WebSocket clients and Pipecat processes."""
 
 import subprocess
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 from fastapi import WebSocket
 
@@ -13,7 +13,35 @@ MEETING_DETAILS: Dict[
 ] = {}  # client_id -> (meeting_url, persona_name, meetingbaas_bot_id, enable_tools, streaming_audio_frequency)
 
 # Global dictionary to store Pipecat processes
-PIPECAT_PROCESSES: Dict[str, subprocess.Popen] = {}  # client_id -> process
+PIPECAT_PROCESSES: Dict[
+    str, subprocess.Popen
+] = {}  # client_id -> process
+
+# Bot status from MeetingBaas webhooks
+BOT_STATUS: Dict[str, str] = {}  # meetingbaas_bot_id -> status_code
+
+# Reverse mapping for fast lookup
+BOT_ID_TO_CLIENT: Dict[
+    str, str
+] = {}  # meetingbaas_bot_id -> internal client_id
+
+# Deferred Pipecat launch params (consumed when bot joins the call)
+PENDING_PIPECAT_PARAMS: Dict[
+    str, Dict[str, Any]
+] = {}  # client_id -> kwargs for start_pipecat_process
+
+# Clients that reached a terminal state (reject further reconnections)
+CLEANED_UP_CLIENTS: Dict[
+    str, float
+] = {}  # client_id -> monotonic timestamp
+
+CLEANUP_REMEMBER_SECONDS = 300
+
+TERMINAL_STATUSES = frozenset({"call_ended", "fatal_error"})
+IN_CALL_STATUSES = frozenset({
+    "in_call_recording",
+    "in_call_not_recording",
+})
 
 
 class ConnectionRegistry:

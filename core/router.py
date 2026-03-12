@@ -28,6 +28,10 @@ class MessageRouter:
         self.closing_clients.add(client_id)
         self.logger.debug(f"Marked client {client_id} as closing")
 
+    def unmark_closing(self, client_id: str):
+        """Remove closing mark so data can flow after reconnection."""
+        self.closing_clients.discard(client_id)
+
     async def send_binary(self, message: bytes, client_id: str):
         """Send binary data to a client."""
         if client_id in self.closing_clients:

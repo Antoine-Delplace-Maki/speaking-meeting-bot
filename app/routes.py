@@ -1,11 +1,12 @@
 """API routes for the Speaking Meeting Bot application."""
 
 import asyncio
+import random
+import time
 import uuid
 from datetime import datetime
 from io import BytesIO
 from typing import Any, Dict, List, Optional, Tuple
-import random
 
 from fastapi import APIRouter, HTTPException, Request, status
 from fastapi.responses import JSONResponse, StreamingResponse
@@ -19,7 +20,17 @@ from app.models import (
 )
 from app.services.image_service import image_service
 from config.persona_utils import persona_manager
-from core.connection import MEETING_DETAILS, PIPECAT_PROCESSES, registry
+from core.connection import (
+    BOT_ID_TO_CLIENT,
+    BOT_STATUS,
+    CLEANED_UP_CLIENTS,
+    IN_CALL_STATUSES,
+    MEETING_DETAILS,
+    PENDING_PIPECAT_PARAMS,
+    PIPECAT_PROCESSES,
+    TERMINAL_STATUSES,
+    registry,
+)
 from core.process import start_pipecat_process, terminate_process_gracefully
 from core.router import router as message_router
 
@@ -321,34 +332,40 @@ async def join_meeting(request: BotRequest, client_request: Request):
     )
 
     if meetingbaas_bot_id:
-        # Update the meetingbaas_bot_id in MEETING_DETAILS
-        # Convert tuple to list to allow assignment
         details = list(MEETING_DETAILS[bot_client_id])
         details[2] = meetingbaas_bot_id
         MEETING_DETAILS[bot_client_id] = tuple(details)
 
-        # Log the client_id for internal reference
-        logger.info(f"Bot created with MeetingBaas bot_id: {meetingbaas_bot_id}")
-        logger.info(f"Internal client_id for WebSocket connections: {bot_client_id}")
+        BOT_ID_TO_CLIENT[meetingbaas_bot_id] = bot_client_id
 
-        # Start the Pipecat process as a subprocess
-        # The Pipecat process should connect to our LOCAL WebSocket server, not the external one
-        pipecat_websocket_url = f"ws://127.0.0.1:{INTERNAL_PORT}/pipecat/{bot_client_id}"
-        process = start_pipecat_process(
-            client_id=bot_client_id,
-            websocket_url=pipecat_websocket_url,  # Use internal URL, not external
-            meeting_url=request.meeting_url,
-            persona_data=resolved_persona_data,
-            streaming_audio_frequency=streaming_audio_frequency,
-            enable_tools=request.enable_tools,
-            api_key=api_key,
-            meetingbaas_bot_id=meetingbaas_bot_id,
+        logger.info(
+            f"Bot created with MeetingBaas bot_id: "
+            f"{meetingbaas_bot_id}"
+        )
+        logger.info(
+            f"Internal client_id for WebSocket connections: "
+            f"{bot_client_id}"
         )
 
-        # Store the process for later termination
-        PIPECAT_PROCESSES[bot_client_id] = process
+        pipecat_ws_url = (
+            f"ws://127.0.0.1:{INTERNAL_PORT}"
+            f"/pipecat/{bot_client_id}"
+        )
+        PENDING_PIPECAT_PARAMS[bot_client_id] = {
+            "websocket_url": pipecat_ws_url,
+            "meeting_url": request.meeting_url,
+            "persona_data": resolved_persona_data,
+            "streaming_audio_frequency": streaming_audio_frequency,
+            "enable_tools": request.enable_tools,
+            "api_key": api_key,
+            "meetingbaas_bot_id": meetingbaas_bot_id,
+        }
 
-        # Return only the bot_id in the response
+        logger.info(
+            "Pipecat process deferred until bot joins the "
+            "meeting (webhook: in_call_recording)"
+        )
+
         return JoinResponse(bot_id=meetingbaas_bot_id)
     else:
         # Clean up MEETING_DETAILS if bot creation failed
@@ -479,19 +496,22 @@ async def leave_bot(
                 success = False
                 logger.error(f"Error terminating Pipecat process: {e}")
 
-        # Remove from our storage
         PIPECAT_PROCESSES.pop(client_id, None)
 
-        # Clean up meeting details
-        if client_id in MEETING_DETAILS:
-            MEETING_DETAILS.pop(client_id, None)
+        MEETING_DETAILS.pop(client_id, None)
+        PENDING_PIPECAT_PARAMS.pop(client_id, None)
 
-        # Release ngrok URL if in local dev mode
         if LOCAL_DEV_MODE and client_id:
             release_ngrok_url(client_id)
             log_ngrok_status()
     else:
-        logger.warning(f"No Pipecat process found for client {client_id}")
+        logger.warning(
+            f"No Pipecat process found for client {client_id}"
+        )
+
+    if meetingbaas_bot_id:
+        BOT_ID_TO_CLIENT.pop(meetingbaas_bot_id, None)
+        BOT_STATUS.pop(meetingbaas_bot_id, None)
 
     return {
         "message": "Bot removal request processed",
@@ -565,6 +585,84 @@ async def generate_persona_image(request: PersonaImageRequest) -> PersonaImageRe
         raise HTTPException(status_code=status_code, detail=str(e))
 
 
+def _maybe_start_pipecat(meetingbaas_bot_id: str) -> None:
+    """Start the Pipecat process if launch params are pending."""
+    client_id = BOT_ID_TO_CLIENT.get(meetingbaas_bot_id)
+    if not client_id:
+        logger.warning(
+            f"[webhook] No client_id for bot "
+            f"{meetingbaas_bot_id}"
+        )
+        return
+
+    if client_id in PIPECAT_PROCESSES:
+        proc = PIPECAT_PROCESSES[client_id]
+        if proc.poll() is None:
+            logger.info(
+                f"[webhook] Pipecat already running for "
+                f"{client_id}"
+            )
+            return
+
+    params = PENDING_PIPECAT_PARAMS.pop(client_id, None)
+    if not params:
+        logger.warning(
+            f"[webhook] No pending Pipecat params for "
+            f"{client_id}"
+        )
+        return
+
+    process = start_pipecat_process(
+        client_id=client_id, **params
+    )
+    PIPECAT_PROCESSES[client_id] = process
+    logger.info(
+        f"[webhook] Started Pipecat for bot "
+        f"{meetingbaas_bot_id} (client {client_id})"
+    )
+
+
+def _cleanup_bot(meetingbaas_bot_id: str) -> None:
+    """Clean up all resources for a bot after a terminal event."""
+    client_id = BOT_ID_TO_CLIENT.get(meetingbaas_bot_id)
+    if not client_id:
+        return
+
+    PENDING_PIPECAT_PARAMS.pop(client_id, None)
+
+    if client_id in PIPECAT_PROCESSES:
+        process = PIPECAT_PROCESSES.pop(client_id)
+        if process and process.poll() is None:
+            try:
+                if terminate_process_gracefully(
+                    process, timeout=3.0
+                ):
+                    logger.info(
+                        f"[cleanup] Terminated Pipecat for "
+                        f"{client_id}"
+                    )
+                else:
+                    logger.warning(
+                        f"[cleanup] Force-killed Pipecat for "
+                        f"{client_id}"
+                    )
+            except Exception as e:
+                logger.error(
+                    f"[cleanup] Error terminating Pipecat: {e}"
+                )
+
+    MEETING_DETAILS.pop(client_id, None)
+    BOT_ID_TO_CLIENT.pop(meetingbaas_bot_id, None)
+
+    CLEANED_UP_CLIENTS[client_id] = time.monotonic()
+    message_router.mark_closing(client_id)
+
+    logger.info(
+        f"[cleanup] Cleaned up bot {meetingbaas_bot_id} "
+        f"(client {client_id})"
+    )
+
+
 @router.post(
     "/webhook",
     tags=["webhook"],
@@ -585,15 +683,29 @@ async def meetingbaas_webhook(request: Request):
         bot_id = data.get("bot_id", "unknown")
 
         if event == "bot.status_change":
-            new_status = data.get("status", "unknown")
+            raw_status = data.get("status", {})
+            status_code = (
+                raw_status.get("code", "unknown")
+                if isinstance(raw_status, dict)
+                else str(raw_status)
+            )
+            BOT_STATUS[bot_id] = status_code
             logger.info(
                 f"[webhook] bot.status_change  "
-                f"bot_id={bot_id}  status={new_status}"
+                f"bot_id={bot_id}  status={raw_status}"
             )
+
+            if status_code in IN_CALL_STATUSES:
+                _maybe_start_pipecat(bot_id)
+            elif status_code in TERMINAL_STATUSES:
+                _cleanup_bot(bot_id)
+
         elif event == "bot.completed":
             logger.info(
                 f"[webhook] bot.completed  bot_id={bot_id}"
             )
+            _cleanup_bot(bot_id)
+
         elif event == "bot.failed":
             error_code = data.get("error_code", "unknown")
             error_msg = data.get("error_message", "")
@@ -601,6 +713,8 @@ async def meetingbaas_webhook(request: Request):
                 f"[webhook] bot.failed  bot_id={bot_id}  "
                 f"error={error_code}: {error_msg}"
             )
+            _cleanup_bot(bot_id)
+
         else:
             logger.info(
                 f"[webhook] {event}  bot_id={bot_id}  "

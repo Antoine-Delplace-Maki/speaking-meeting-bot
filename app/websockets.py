@@ -6,8 +6,17 @@ import time
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
-from core.connection import MEETING_DETAILS, PIPECAT_PROCESSES, registry
-from core.process import start_pipecat_process, terminate_process_gracefully
+from core.connection import (
+    BOT_ID_TO_CLIENT,
+    BOT_STATUS,
+    CLEANED_UP_CLIENTS,
+    CLEANUP_REMEMBER_SECONDS,
+    MEETING_DETAILS,
+    PIPECAT_PROCESSES,
+    TERMINAL_STATUSES,
+    registry,
+)
+from core.process import terminate_process_gracefully
 from core.router import router as message_router
 from meetingbaas_pipecat.utils.logger import logger
 from utils.ngrok import LOCAL_DEV_MODE, log_ngrok_status, release_ngrok_url
@@ -16,12 +25,14 @@ INTERNAL_PORT = os.getenv("PORT", "7014")
 
 websocket_router = APIRouter()
 
-_cleaned_up_clients: dict[str, float] = {}
-_CLEANUP_REMEMBER_SECONDS = 300
 
-
-def find_client_id_by_meetingbaas_bot_id(meetingbaas_bot_id: str) -> str | None:
+def find_client_id_by_meetingbaas_bot_id(
+    meetingbaas_bot_id: str,
+) -> str | None:
     """Look up the internal client_id by MeetingBaas bot_id."""
+    client_id = BOT_ID_TO_CLIENT.get(meetingbaas_bot_id)
+    if client_id:
+        return client_id
     for internal_id, details in MEETING_DETAILS.items():
         if len(details) > 2 and details[2] == meetingbaas_bot_id:
             return internal_id
@@ -29,150 +40,202 @@ def find_client_id_by_meetingbaas_bot_id(meetingbaas_bot_id: str) -> str | None:
 
 
 def _is_stale_client(client_id: str) -> bool:
-    """Return True if this client was already cleaned up recently."""
-    ts = _cleaned_up_clients.get(client_id)
+    """Return True if this client reached a terminal state."""
+    ts = CLEANED_UP_CLIENTS.get(client_id)
     if ts is None:
         return False
-    if time.monotonic() - ts > _CLEANUP_REMEMBER_SECONDS:
-        _cleaned_up_clients.pop(client_id, None)
+    if time.monotonic() - ts > CLEANUP_REMEMBER_SECONDS:
+        CLEANED_UP_CLIENTS.pop(client_id, None)
         return False
     return True
 
 
+def _get_bot_status(client_id: str) -> str | None:
+    """Look up the latest webhook status for a client."""
+    details = MEETING_DETAILS.get(client_id)
+    if not details or len(details) < 3:
+        return None
+    meetingbaas_bot_id = details[2]
+    if not meetingbaas_bot_id:
+        return None
+    return BOT_STATUS.get(meetingbaas_bot_id)
+
+
 @websocket_router.websocket("/ws/{client_id}")
-async def websocket_endpoint(websocket: WebSocket, client_id: str):
-    """Handle WebSocket connections from clients."""
+async def websocket_endpoint(
+    websocket: WebSocket, client_id: str
+):
+    """Handle WebSocket connections from MeetingBaas clients."""
     await registry.connect(websocket, client_id)
 
     if _is_stale_client(client_id):
         logger.info(
-            f"Ignoring reconnection from already-cleaned-up "
-            f"client {client_id}"
+            f"Ignoring reconnection from terminal client "
+            f"{client_id}"
         )
         await websocket.close(
             code=1000, reason="Session already ended"
         )
         return
 
+    message_router.unmark_closing(client_id)
     logger.info(f"Client {client_id} connected")
 
+    internal_client_id = client_id
     try:
-        internal_client_id = client_id
         if client_id not in MEETING_DETAILS:
-            internal_client_id = find_client_id_by_meetingbaas_bot_id(client_id)
+            internal_client_id = (
+                find_client_id_by_meetingbaas_bot_id(client_id)
+            )
             if internal_client_id:
-                logger.info(f"Found internal client_id {internal_client_id} for MeetingBaas bot_id {client_id}")
+                logger.info(
+                    f"Found internal client_id "
+                    f"{internal_client_id} for MeetingBaas "
+                    f"bot_id {client_id}"
+                )
+                message_router.unmark_closing(
+                    internal_client_id
+                )
             else:
-                logger.warning(f"No meeting details found for client {client_id}")
-                await websocket.close(code=1008, reason="Missing meeting details")
+                logger.warning(
+                    f"No meeting details found for "
+                    f"client {client_id}"
+                )
+                await websocket.close(
+                    code=1008,
+                    reason="Missing meeting details",
+                )
                 return
 
-        # Get stored meeting details with fallbacks to ensure compatibility
         meeting_details = MEETING_DETAILS[internal_client_id]
-        meeting_url = meeting_details[0] if len(meeting_details) > 0 else None
-        persona_name = meeting_details[1] if len(meeting_details) > 1 else None
-        meetingbaas_bot_id = meeting_details[2] if len(meeting_details) > 2 else None
-        enable_tools = meeting_details[3] if len(meeting_details) > 3 else False
-
-        # Default to 16khz if not specified
+        meeting_url = (
+            meeting_details[0]
+            if len(meeting_details) > 0
+            else None
+        )
+        persona_name = (
+            meeting_details[1]
+            if len(meeting_details) > 1
+            else None
+        )
+        meetingbaas_bot_id = (
+            meeting_details[2]
+            if len(meeting_details) > 2
+            else None
+        )
+        enable_tools = (
+            meeting_details[3]
+            if len(meeting_details) > 3
+            else False
+        )
         streaming_audio_frequency = (
-            meeting_details[4] if len(meeting_details) > 4 else "16khz"
+            meeting_details[4]
+            if len(meeting_details) > 4
+            else "16khz"
         )
 
         logger.info(
-            f"Retrieved meeting details for {internal_client_id}: {meeting_url}, {persona_name}, {meetingbaas_bot_id}, {enable_tools}, {streaming_audio_frequency}"
+            f"Retrieved meeting details for "
+            f"{internal_client_id}: {meeting_url}, "
+            f"{persona_name}, {meetingbaas_bot_id}, "
+            f"{enable_tools}, {streaming_audio_frequency}"
         )
 
-        # Check if a Pipecat process is already running for this client
         if (
             internal_client_id in PIPECAT_PROCESSES
-            and PIPECAT_PROCESSES[internal_client_id].poll() is None
+            and PIPECAT_PROCESSES[internal_client_id].poll()
+            is None
         ):
-            logger.info(f"Pipecat process already running for client {internal_client_id}")
+            logger.info(
+                f"Pipecat process running for "
+                f"client {internal_client_id}"
+            )
         else:
-            # Start Pipecat process if not already running
-            pipecat_websocket_url = f"ws://127.0.0.1:{INTERNAL_PORT}/pipecat/{internal_client_id}"
-            process = start_pipecat_process(
-                client_id=internal_client_id,
-                websocket_url=pipecat_websocket_url,
-                meeting_url=meeting_url,
-                persona_data={"name": persona_name},
-                streaming_audio_frequency=streaming_audio_frequency,
-                enable_tools=enable_tools,
-                api_key="",
-                meetingbaas_bot_id=meetingbaas_bot_id or "",
+            logger.info(
+                f"Pipecat not yet running for "
+                f"{internal_client_id} — will start when "
+                f"bot joins the meeting"
             )
 
-            # Store the process for cleanup
-            PIPECAT_PROCESSES[internal_client_id] = process
-
-        # Process messages - route to Pipecat using internal_client_id
         while True:
             try:
                 message = await websocket.receive()
             except RuntimeError as e:
-                if "Cannot call \"receive\" once a disconnect message has been received" in str(e):
-                    logger.info(f"WebSocket for client {client_id} closed by client.")
+                if "disconnect" in str(e).lower():
+                    logger.info(
+                        f"WebSocket for client {client_id} "
+                        f"closed by client."
+                    )
                     break
                 raise
 
-            # logger.info(f"Received message type: {type(message)}, keys: {list(message.keys())}")
             if "bytes" in message:
                 audio_data = message["bytes"]
-                logger.debug(
-                    f"Received audio data ({len(audio_data)} bytes) from client {client_id}"
+                await message_router.send_to_pipecat(
+                    audio_data, internal_client_id
                 )
-                # Route to Pipecat using internal_client_id
-                await message_router.send_to_pipecat(audio_data, internal_client_id)
             elif "text" in message:
                 text_data = message["text"]
                 logger.info(
-                    f"Received text message from client {client_id}: {text_data[:100]}..."
+                    f"Received text from client "
+                    f"{client_id}: {text_data[:100]}..."
                 )
     except WebSocketDisconnect:
-        logger.info(f"WebSocket disconnected for client {client_id}")
+        logger.info(
+            f"WebSocket disconnected for client {client_id}"
+        )
     except Exception as e:
-        logger.error(f"Error in WebSocket connection: {e} (repr: {repr(e)})")
+        logger.error(
+            f"Error in WebSocket connection: {e} "
+            f"(repr: {repr(e)})"
+        )
     finally:
-        _cleaned_up_clients[client_id] = time.monotonic()
-        if internal_client_id != client_id:
-            _cleaned_up_clients[internal_client_id] = time.monotonic()
+        bot_status = _get_bot_status(internal_client_id)
+        is_terminal = bot_status in TERMINAL_STATUSES
 
-        if internal_client_id in PIPECAT_PROCESSES:
-            process = PIPECAT_PROCESSES[internal_client_id]
-            if process and process.poll() is None:  # If process is still running
-                try:
-                    if terminate_process_gracefully(process, timeout=3.0):
-                        logger.info(
-                            f"Gracefully terminated Pipecat process for client {internal_client_id}"
-                        )
-                    else:
-                        logger.warning(
-                            f"Had to forcefully kill Pipecat process for client {internal_client_id}"
-                        )
-                except Exception as e:
-                    logger.error(f"Error terminating process: {e}")
-            # Remove from our storage
-            PIPECAT_PROCESSES.pop(internal_client_id, None)
+        if is_terminal:
+            CLEANED_UP_CLIENTS[client_id] = time.monotonic()
+            if internal_client_id != client_id:
+                CLEANED_UP_CLIENTS[
+                    internal_client_id
+                ] = time.monotonic()
 
-        if internal_client_id in MEETING_DETAILS:
+            if internal_client_id in PIPECAT_PROCESSES:
+                process = PIPECAT_PROCESSES.pop(
+                    internal_client_id
+                )
+                if process and process.poll() is None:
+                    try:
+                        terminate_process_gracefully(
+                            process, timeout=3.0
+                        )
+                    except Exception as e:
+                        logger.error(
+                            f"Error terminating process: {e}"
+                        )
+
             MEETING_DETAILS.pop(internal_client_id, None)
+            message_router.mark_closing(internal_client_id)
 
-        # Mark client as closing to prevent further message sending
-        message_router.mark_closing(internal_client_id)
+            logger.info(
+                f"Full cleanup for terminal client "
+                f"{client_id} (status={bot_status})"
+            )
 
-        # Gracefully disconnect - wrapping in try/except to handle already closed connections
+            if LOCAL_DEV_MODE:
+                release_ngrok_url(client_id)
+                log_ngrok_status()
+        else:
+            logger.info(
+                f"Client {client_id} disconnected "
+                f"(status={bot_status}) — allowing "
+                f"reconnection"
+            )
+
         try:
             await registry.disconnect(client_id)
-            logger.info(f"Client {client_id} disconnected")
-        except Exception as e:
-            # Only log at debug level since this is expected during abrupt disconnections
-            logger.debug(f"Error disconnecting client {client_id}: {e}")
-
-        # Release ngrok URL
-        if LOCAL_DEV_MODE:
-            release_ngrok_url(client_id)
-            log_ngrok_status()
+        except Exception:
+            pass
 
 
 @websocket_router.websocket("/pipecat/{client_id}")
