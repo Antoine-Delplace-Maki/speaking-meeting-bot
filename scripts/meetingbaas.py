@@ -1,7 +1,6 @@
 import argparse
 import asyncio
 import os
-import os
 from datetime import datetime
 
 import aiohttp
@@ -10,16 +9,18 @@ from dotenv import load_dotenv
 from pipecat.adapters.schemas.function_schema import FunctionSchema
 from pipecat.adapters.schemas.tools_schema import ToolsSchema
 from pipecat.audio.vad.silero import SileroVADAnalyzer, VADParams
-from pipecat.frames.frames import LLMMessagesFrame, TextFrame
+from pipecat.frames.frames import LLMMessagesUpdateFrame, TextFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
-from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
+from pipecat.processors.aggregators.llm_context import LLMContext
+from pipecat.processors.aggregators.llm_response_universal import (
+    LLMContextAggregatorPair,
+    LLMUserAggregatorParams,
+)
 from pipecat.serializers.protobuf import ProtobufFrameSerializer
 from pipecat.services.cartesia.tts import CartesiaTTSService
 from pipecat.services.deepgram.stt import DeepgramSTTService
-
-# from pipecat.services.gladia.stt import GladiaSTTService
 from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.transports.websocket.client import (
     WebsocketClientParams,
@@ -152,15 +153,6 @@ async def main(
             audio_out_enabled=True,
             add_wav_header=False,
             audio_in_enabled=True,
-            vad_analyzer=SileroVADAnalyzer(
-                sample_rate=16000,
-                params=VADParams(
-                    threshold=0.5,
-                    min_speech_duration_ms=250,
-                    min_silence_duration_ms=100,
-                    min_volume=0.6,
-                ),
-            ),
             audio_in_passthrough=True,
             serializer=ProtobufFrameSerializer(),
             timeout=300,
@@ -170,23 +162,6 @@ async def main(
     log_and_flush(logging.INFO, f"[TRANSPORT] URI: {websocket_url}")
     log_and_flush(logging.INFO, f"[TRANSPORT] Audio out enabled: True, sample_rate: {output_sample_rate}")
     log_and_flush(logging.INFO, "[TRANSPORT] Audio in enabled: True, VAD sample_rate: 16000")
-
-    # Add WebSocket connection event handlers for debugging
-    @transport.event_handler("on_client_connected")
-    async def on_client_connected(transport, client):
-        log_and_flush(logging.INFO, "[WEBSOCKET] Client connected to WebSocket server")
-        
-    @transport.event_handler("on_client_disconnected") 
-    async def on_client_disconnected(transport, client):
-        log_and_flush(logging.INFO, "[WEBSOCKET] Client disconnected from WebSocket server")
-
-    @transport.event_handler("on_connection_established")
-    async def on_connection_established(transport):
-        log_and_flush(logging.INFO, "[WEBSOCKET] WebSocket connection established successfully")
-        
-    @transport.event_handler("on_connection_error")
-    async def on_connection_error(transport, error):
-        log_and_flush(logging.ERROR, f"[WEBSOCKET] Connection error: {error}")
 
     persona_manager = PersonaManager()
     persona = persona_manager.get_persona(persona_name)
@@ -207,16 +182,14 @@ async def main(
 
     tts = CartesiaTTSService(
         api_key=os.getenv("CARTESIA_API_KEY"),
-        voice_id=voice_id,
         sample_rate=output_sample_rate,
-        speed="normal",
+        settings=CartesiaTTSService.Settings(voice=voice_id),
     )
     log_and_flush(logging.INFO, f"[TTS] Cartesia TTS initialized with sample_rate={output_sample_rate}, voice_id={voice_id}")
 
     llm = OpenAILLMService(
         api_key=os.getenv("OPENAI_API_KEY"),
-        model="gpt-4.1",
-        run_in_parallel=False,
+        settings=OpenAILLMService.Settings(model="gpt-4.1"),
     )
     log_and_flush(logging.INFO, "[LLM] OpenAI LLM initialized with model=gpt-4.1")
 
@@ -300,19 +273,28 @@ async def main(
         },
     ]
 
-    # Create the context object - with or without tools
-    if enable_tools and tools:
-        context = OpenAILLMContext(messages, tools)
-    else:
-        context = OpenAILLMContext(messages)
+    context = LLMContext(
+        messages=messages,
+        tools=tools if enable_tools and tools else None,
+    )
 
-    # Get the context aggregator pair using the LLM's method
-    # This handles properly setting up the context aggregators
-    aggregator_pair = llm.create_context_aggregator(context)
+    context_aggregator = LLMContextAggregatorPair(
+        context=context,
+        user_params=LLMUserAggregatorParams(
+            vad_analyzer=SileroVADAnalyzer(
+                sample_rate=16000,
+                params=VADParams(
+                    threshold=0.5,
+                    min_speech_duration_ms=250,
+                    min_silence_duration_ms=100,
+                    min_volume=0.6,
+                ),
+            ),
+        ),
+    )
 
-    # Get the user and assistant aggregators from the pair
-    user_aggregator = aggregator_pair.user()
-    assistant_aggregator = aggregator_pair.assistant()
+    user_aggregator = context_aggregator.user()
+    assistant_aggregator = context_aggregator.assistant()
 
     # Log pipeline step data
     def log_pipeline_step(step_name, data):
@@ -354,7 +336,7 @@ async def main(
             log_and_flush(logging.INFO, "[BOT] Waiting 2 seconds before sending initial message")
             await asyncio.sleep(2)
             log_and_flush(logging.INFO, f"[BOT] Queuing initial message: {initial_message}")
-            await task.queue_frames([LLMMessagesFrame([initial_message])])
+            await task.queue_frames([LLMMessagesUpdateFrame(messages=[initial_message], run_llm=True)])
             log_and_flush(logging.INFO, "[BOT] Initial greeting message queued successfully")
             
             # Also queue a simple TTS test
