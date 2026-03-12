@@ -497,7 +497,7 @@ async def leave_bot(
     },
 )
 async def generate_persona_image(request: PersonaImageRequest) -> PersonaImageResponse:
-    """Generate an image for a persona using Replicate."""
+    """Generate an image for a persona using OpenAI DALL-E."""
     try:
         # Build the prompt from available fields
         # Build the prompt using a more concise approach

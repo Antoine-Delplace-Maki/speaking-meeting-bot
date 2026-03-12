@@ -1,133 +1,101 @@
-"""Service for handling image generation using Replicate."""
+"""Service for generating persona images using the OpenAI DALL-E API."""
 
-from typing import Optional
-from loguru import logger
-from PIL import Image
-import requests
-from io import BytesIO
-import os
-import replicate
-from pathlib import Path
-from dotenv import load_dotenv
-from config.image_uploader import UTFSUploader
-from config.prompts import IMAGE_NEGATIVE_PROMPT
 import asyncio
+import os
 
+from dotenv import load_dotenv
+from loguru import logger
+from openai import OpenAI
 
-# Load environment variables
 load_dotenv()
 
-_PLACEHOLDER_VALUES = frozenset([
-    "", "your_replicate_key_here", "your_utfs_key_here", "your_app_id_here",
-])
+_MAX_PROMPT_LENGTH = 3500
 
 
 class ImageService:
-    """Service for handling image generation and processing."""
+    """Generates persona headshot images via OpenAI DALL-E 3."""
 
     def __init__(self):
         """Initialize the image service."""
-        self.replicate_key = os.getenv("REPLICATE_KEY", "")
-        if self.replicate_key.startswith("sk_live_"):
-            self.replicate_key = self.replicate_key.replace(
-                "sk_live_", ""
-            )
-        os.environ["REPLICATE_API_TOKEN"] = self.replicate_key
-
-        utfs_key = os.getenv("UTFS_KEY", "")
-        app_id = os.getenv("APP_ID", "")
-
-        self._enabled = (
-            self.replicate_key not in _PLACEHOLDER_VALUES
-            and utfs_key not in _PLACEHOLDER_VALUES
-            and app_id not in _PLACEHOLDER_VALUES
-        )
+        api_key = os.getenv("OPENAI_API_KEY", "")
+        self._enabled = bool(api_key)
 
         if self._enabled:
-            self.uploader = UTFSUploader(
-                api_key=utfs_key, app_id=app_id
-            )
-            logger.info(
-                "Initialized Replicate client and UTFSUploader "
-                "for image generation"
-            )
+            self._client = OpenAI(api_key=api_key)
+            logger.info("ImageService ready (OpenAI DALL-E 3)")
         else:
-            self.uploader = None
+            self._client = None
             logger.warning(
-                "Image generation disabled — REPLICATE_KEY, "
-                "UTFS_KEY, or APP_ID not configured"
+                "Image generation disabled — OPENAI_API_KEY "
+                "not configured"
             )
-    
+
     async def generate_persona_image(
         self,
         name: str,
         prompt: str,
         style: str = "realistic",
-        size: tuple[int, int] = (512, 512)
-        ) -> str:
+        size: tuple[int, int] = (1024, 1024),
+    ) -> str:
+        """Generate a persona headshot and return its URL.
 
+        Args:
+            name: Persona display name (used in the prompt).
+            prompt: Description of the persona's appearance.
+            style: Artistic style hint prepended to the prompt.
+            size: Desired dimensions (mapped to nearest DALL-E 3
+                size: 1024x1024, 1024x1792, or 1792x1024).
+
+        Returns:
+            A URL pointing to the generated image, or an empty
+            string when generation is disabled or fails.
+        """
         if not self._enabled:
             logger.debug("Skipping image generation (not configured)")
             return ""
 
+        dall_e_size = _pick_dalle_size(size)
+        full_prompt = (
+            f"Professional headshot portrait of a person named {name}. "
+            f"Style: {style}. {prompt}. "
+            "Single person, face and shoulders, centered, "
+            "neutral background, no text or watermarks."
+        )
+        if len(full_prompt) > _MAX_PROMPT_LENGTH:
+            full_prompt = full_prompt[:_MAX_PROMPT_LENGTH]
+
+        logger.info(
+            f"Generating image via DALL-E 3 "
+            f"(size={dall_e_size}, prompt={len(full_prompt)} chars)"
+        )
+
         try:
-            full_prompt = f"{style} style, {prompt}"
-
-            logger.info(f"Generating image with prompt: {full_prompt}")
-
-            # Generate image using Replicate's SDXL
-            output = await asyncio.to_thread(replicate.run,
-                "stability-ai/sdxl:7762fd07cf82c948538e41f63f77d685e02b063e37e496e96eefd46c929f9bdc",
-                input={
-                    "prompt": full_prompt,
-                    "width": size[0],
-                    "height": size[1],
-                    "refine": "expert_ensemble_refiner",
-                    "apply_watermark": False,
-                    "num_inference_steps": 25,
-                    "negative_prompt": IMAGE_NEGATIVE_PROMPT,
-                    "scheduler": "DPMSolverMultistep",
-                    "guidance_scale": 7.5,
-                },
+            response = await asyncio.to_thread(
+                self._client.images.generate,
+                model="dall-e-3",
+                prompt=full_prompt,
+                size=dall_e_size,
+                quality="standard",
+                n=1,
             )
+            image_url = response.data[0].url
+            logger.info(f"Image generated for '{name}': {image_url[:80]}…")
+            return image_url
 
-            if not output or len(output) == 0:
-                raise ValueError("No output received from Replicate")
-
-            # Get the image URL from Replicate
-            if isinstance(output, list) and len(output) > 0:
-                image_url = output[0]
-            else:
-                raise ValueError(f"Unexpected output format from Replicate: {output}")
-
-            # Download the image
-            response = requests.get(image_url)
-            if response.status_code != 200:
-                raise ValueError(f"Failed to download image. Status code: {response.status_code}")
-            
-            # Save to temporary file
-            temp_path = f"{name}.png"
-            with open(temp_path, "wb") as f:
-                f.write(response.content)
-
-            # Upload to UTFS
-            file_url = await asyncio.to_thread(self.uploader.upload_file, Path(temp_path))
-
-            # Clean up temporary file
-            try:
-                os.remove(temp_path)
-            except FileNotFoundError:
-                logger.warning(f"Temporary image file not found for cleanup: {temp_path}")
-
-            if not file_url:
-                raise ValueError("Failed to upload image to UTFS")
-
-            return file_url
-        
-        except Exception as e:       
-            logger.error(f"Failed to generate image: {str(e)}")
-            raise ValueError(f"Failed to generate image: {str(e)}") from e
+        except Exception as e:
+            logger.error(f"Failed to generate image: {e}")
+            return ""
 
 
-# Create global instance
-image_service = ImageService() 
+def _pick_dalle_size(size: tuple[int, int]) -> str:
+    """Map an arbitrary (w, h) to the closest DALL-E 3 size string."""
+    w, h = size
+    ratio = w / h if h else 1.0
+    if ratio > 1.3:
+        return "1792x1024"
+    if ratio < 0.77:
+        return "1024x1792"
+    return "1024x1024"
+
+
+image_service = ImageService()
