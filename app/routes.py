@@ -67,14 +67,21 @@ def _build_image_prompt(persona: dict) -> str:
     characteristics = persona.get("characteristics", [])
 
     if persona.get("is_randomized_candidate"):
-        gender_word = gender.lower() if gender else "person"
+        gender_word = gender.lower() if gender and gender.lower() != "non-binary" else "person"
         return (
-            f"Realistic photograph taken from a laptop webcam during a video call interview. "
-            f"A {gender_word} named {name} is sitting at a desk, looking directly at the camera. "
-            f"Slightly elevated webcam angle, natural indoor lighting, casual home office or "
-            f"living room background slightly out of focus. The person looks natural and relaxed "
-            f"but professional, as if on a real Zoom or Google Meet call. "
-            f"Photorealistic, candid, no studio lighting, no filters."
+            f"A candid photograph of a {gender_word} in their mid-twenties to mid-thirties, "
+            f"captured from a laptop webcam during a video interview. "
+            f"They are sitting at a desk in a real lived-in room — maybe a bedroom, a small "
+            f"apartment, or a home office with everyday clutter slightly visible in the blurred "
+            f"background. Natural window light mixed with warm indoor lighting. "
+            f"The webcam angle is slightly above eye level, typical of a laptop camera. "
+            f"The person is looking directly into the camera with a natural, slightly nervous "
+            f"but friendly expression — like someone in a real job interview. "
+            f"They are wearing casual-professional clothes (a simple shirt or sweater). "
+            f"Skin texture, minor imperfections, and natural hair are visible. "
+            f"No makeup filters, no beauty retouching, no studio lighting. "
+            f"The image looks exactly like a still frame from a real Zoom or Google Meet call. "
+            f"Photorealistic, 35mm film grain, shallow depth of field on the background."
         )
 
     parts = [f"A friendly {gender.lower()} professional" if gender else "A friendly professional"]
@@ -181,15 +188,15 @@ async def join_meeting(request: BotRequest, client_request: Request):
         else:
             # Fallback if prompt details extraction fails or returns unexpected type
             logger.warning("Failed to extract persona details from custom prompt or received unexpected type. Falling back to default bot persona.")
-            resolved_persona_data = persona_manager.get_persona("baas_onboarder")
-            resolved_persona_data["is_temporary"] = False # Ensure fallback is not marked temporary
-            persona_name_for_logging = resolved_persona_data.get("name", "baas_onboarder")
+            resolved_persona_data = persona_manager.get_persona("maki_candidate")
+            resolved_persona_data["is_temporary"] = False
+            persona_name_for_logging = resolved_persona_data.get("name", "maki_candidate")
             final_prompt = resolved_persona_data["prompt"] + PERSONA_INTERACTION_INSTRUCTIONS
 
     else: # Case 2: No custom prompt, use pre-defined persona
         resolved_persona_name: str
 
-        # Priority: request.personas > request.bot_name > random > baas_onboarder
+        # Priority: request.personas > request.bot_name > random > maki_candidate
         if request.personas and len(request.personas) > 0:
             resolved_persona_name = request.personas[0]
             logger.info(f"Using specified persona '{resolved_persona_name}' for bot.")
@@ -202,8 +209,8 @@ async def join_meeting(request: BotRequest, client_request: Request):
                 resolved_persona_name = random.choice(available_personas)
                 logger.info(f"No persona specified, using random persona '{resolved_persona_name}' for bot.")
             else:
-                resolved_persona_name = "baas_onboarder"
-                logger.warning("No personas found, using fallback persona: baas_onboarder.")
+                resolved_persona_name = "maki_candidate"
+                logger.warning("No personas found, using fallback persona: maki_candidate.")
 
         try:
             resolved_persona_data = persona_manager.get_persona(resolved_persona_name)
@@ -219,10 +226,10 @@ async def join_meeting(request: BotRequest, client_request: Request):
                 final_prompt = resolved_persona_data["prompt"] + PERSONA_INTERACTION_INSTRUCTIONS
                 logger.info(f"Randomized persona to '{persona_name_for_logging}' ({resolved_persona_data['gender']})")
         except KeyError as e:
-            logger.error(f"Resolved persona '{resolved_persona_name}' not found: {e}. Falling back to baas_onboarder.")
-            resolved_persona_data = persona_manager.get_persona("baas_onboarder")
-            resolved_persona_data["is_temporary"] = False # Ensure fallback is not marked temporary
-            persona_name_for_logging = resolved_persona_data.get("name", "baas_onboarder")
+            logger.error(f"Resolved persona '{resolved_persona_name}' not found: {e}. Falling back to maki_candidate.")
+            resolved_persona_data = persona_manager.get_persona("maki_candidate")
+            resolved_persona_data["is_temporary"] = False
+            persona_name_for_logging = resolved_persona_data.get("name", "maki_candidate")
             final_prompt = resolved_persona_data["prompt"] + PERSONA_INTERACTION_INSTRUCTIONS
             logger.info(f"Using fallback persona '{persona_name_for_logging}'.")
 
