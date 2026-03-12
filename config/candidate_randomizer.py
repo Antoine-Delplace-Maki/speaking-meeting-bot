@@ -41,14 +41,23 @@ _PERSONALITY_SEEDS = [
 ]
 
 
-def _build_generation_prompt() -> str:
-    """Build the candidate generation prompt with random seed constraints."""
+def _build_generation_prompt() -> tuple[str, Dict[str, Any]]:
+    """Build the candidate generation prompt with random seed constraints.
+
+    Returns the prompt string and a dict of the chosen seeds.
+    """
     region = random.choice(_CULTURAL_REGIONS)
     gender = random.choice(_GENDERS)
     band_label, min_yoe, max_yoe = random.choice(_EXPERIENCE_BANDS)
     personality = random.choice(_PERSONALITY_SEEDS)
 
-    return f"""Generate a realistic fictional job candidate profile for a tech interview simulation.
+    seeds = {
+        "cultural_background": region,
+        "gender": gender,
+        "experience_band": band_label,
+    }
+
+    prompt = f"""Generate a realistic fictional job candidate profile for a tech interview simulation.
 
 CONSTRAINTS (you MUST follow these):
 - Cultural background: {region}
@@ -56,10 +65,11 @@ CONSTRAINTS (you MUST follow these):
 - Experience level: {band_label} ({min_yoe}-{max_yoe} years)
 - Personality trait during interviews: {personality}
 
-Pick a first name that is authentic to the cultural background above.
+Pick a first name and last name that are authentic to the cultural background above.
 
 Return a JSON object with these exact fields:
-- "name": a realistic first name matching the cultural background
+- "first_name": a realistic first name matching the cultural background
+- "last_name": a realistic last name matching the cultural background
 - "age": number between 22 and 38 (consistent with experience level)
 - "gender": "{gender}"
 - "degree": their degree (e.g. "Bachelor's in Software Engineering", "Master's in Computer Science")
@@ -77,10 +87,12 @@ Return a JSON object with these exact fields:
 
 Return ONLY valid JSON, no markdown fences or extra text."""
 
+    return prompt, seeds
+
 
 def _build_candidate_prompt(profile: Dict[str, Any]) -> str:
     """Build a full system prompt from a generated candidate profile."""
-    name = profile["name"]
+    name = f"{profile['first_name']} {profile['last_name']}"
     languages_strong = ", ".join(profile["primary_languages"])
     languages_secondary = ", ".join(profile["secondary_languages"])
     tools = ", ".join(profile["databases_and_tools"])
@@ -134,13 +146,13 @@ async def generate_random_candidate(base_persona: Dict[str, Any]) -> Dict[str, A
     """
     client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
-    prompt = _build_generation_prompt()
-    logger.info(f"Candidate generation prompt seeds: {prompt.split('CONSTRAINTS')[1].split('Pick')[0].strip()}")
+    generation_prompt, seeds = _build_generation_prompt()
+    logger.info(f"Candidate generation seeds: {seeds}")
 
     try:
         response = client.chat.completions.create(
             model="gpt-4.1-mini",
-            messages=[{"role": "user", "content": prompt}],
+            messages=[{"role": "user", "content": generation_prompt}],
             max_tokens=500,
             temperature=1.0,
         )
@@ -151,8 +163,12 @@ async def generate_random_candidate(base_persona: Dict[str, Any]) -> Dict[str, A
             raw = raw.rsplit("```", 1)[0]
 
         profile = json.loads(raw)
+        if "name" in profile and "first_name" not in profile:
+            parts = profile["name"].split(None, 1)
+            profile["first_name"] = parts[0]
+            profile["last_name"] = parts[1] if len(parts) > 1 else ""
         logger.info(
-            f"Generated random candidate: {profile['name']} "
+            f"Generated random candidate: {profile['first_name']} {profile['last_name']} "
             f"({profile['gender']}, {profile['age']}yo, {profile['previous_role']})"
         )
 
@@ -161,11 +177,14 @@ async def generate_random_candidate(base_persona: Dict[str, Any]) -> Dict[str, A
         profile = _fallback_random_profile()
 
     prompt = _build_candidate_prompt(profile)
+    full_name = f"{profile['first_name']} {profile['last_name']}"
 
     return {
-        "name": profile["name"],
+        "name": full_name,
         "prompt": prompt,
         "gender": profile["gender"],
+        "age": profile.get("age", 28),
+        "cultural_background": seeds.get("cultural_background", ""),
         "image": "",
         "entry_message": "",
         "cartesia_voice_id": "",
@@ -177,14 +196,20 @@ async def generate_random_candidate(base_persona: Dict[str, Any]) -> Dict[str, A
 
 def _fallback_random_profile() -> Dict[str, Any]:
     """Simple local randomization fallback when the AI call fails."""
-    names_male = ["James", "Marcus", "Raj", "Carlos", "Wei", "Dmitri", "Kofi", "Yuki", "Hassan", "Liam"]
-    names_female = ["Priya", "Sofia", "Amara", "Mei", "Fatima", "Olga", "Isabella", "Nkechi", "Sakura", "Emma"]
-    names_nb = ["Alex", "Jordan", "Riley", "Sam", "Avery", "Quinn", "Morgan", "Kai", "Robin", "Sage"]
+    first_names_male = ["James", "Marcus", "Raj", "Carlos", "Wei", "Dmitri", "Kofi", "Yuki", "Hassan", "Liam"]
+    first_names_female = ["Priya", "Sofia", "Amara", "Mei", "Fatima", "Olga", "Isabella", "Nkechi", "Sakura", "Emma"]
+    first_names_nb = ["Alex", "Jordan", "Riley", "Sam", "Avery", "Quinn", "Morgan", "Kai", "Robin", "Sage"]
+    last_names = [
+        "Patel", "Kim", "Okafor", "Andersen", "Torres", "Nakamura", "Chen",
+        "Ivanov", "da Silva", "Al-Farsi", "Kowalski", "Mbeki", "Johansson",
+        "Reyes", "Fitzgerald", "Chakraborty", "Nguyen", "Osei", "Müller", "Bianchi",
+    ]
 
     gender = random.choice(["MALE", "FEMALE", "NON-BINARY"])
-    name = random.choice(
-        names_male if gender == "MALE" else names_female if gender == "FEMALE" else names_nb
+    first_name = random.choice(
+        first_names_male if gender == "MALE" else first_names_female if gender == "FEMALE" else first_names_nb
     )
+    last_name = random.choice(last_names)
 
     roles = [
         "backend engineer", "full-stack developer", "data engineer",
@@ -250,7 +275,8 @@ def _fallback_random_profile() -> Dict[str, Any]:
     ]
 
     return {
-        "name": name,
+        "first_name": first_name,
+        "last_name": last_name,
         "age": random.randint(23, 36),
         "gender": gender,
         "degree": random.choice(degrees),

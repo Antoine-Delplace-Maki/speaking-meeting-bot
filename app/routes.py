@@ -78,17 +78,58 @@ def _build_image_prompt(persona: dict) -> str:
     characteristics = persona.get("characteristics", [])
 
     if persona.get("is_randomized_candidate"):
+        import random as _rng
         gender_word = gender.lower() if gender and gender.lower() != "non-binary" else "person"
+        age = persona.get("age", "late twenties")
+        cultural_bg = persona.get("cultural_background", "")
+
+        clothing = _rng.choice([
+            "a plain crew-neck t-shirt",
+            "a button-up shirt with rolled sleeves",
+            "a cozy knit sweater",
+            "a hoodie with the zipper half-open",
+            "a casual blazer over a simple tee",
+            "a flannel shirt",
+            "a polo shirt",
+        ])
+        hair = _rng.choice([
+            "short cropped hair",
+            "shoulder-length wavy hair",
+            "a neat bun",
+            "curly natural hair",
+            "straight hair tucked behind one ear",
+            "a buzz cut",
+            "medium-length tousled hair",
+            "braids",
+            "long straight hair",
+        ])
+        room = _rng.choice([
+            "a small bedroom with a bookshelf in the background",
+            "a tidy home office with a plant on the desk",
+            "a living room with a couch and curtains behind them",
+            "a kitchen table setup with cabinets blurred in the back",
+            "a cluttered desk in a college dorm room",
+            "a minimalist room with a white wall and a single poster",
+            "a cozy apartment with warm lamp light in the background",
+        ])
+        expression = _rng.choice([
+            "a natural, slightly nervous but friendly expression",
+            "a warm, relaxed smile",
+            "a focused, attentive look with a slight smile",
+            "a calm, composed expression with a hint of confidence",
+            "a thoughtful look, mid-sentence",
+        ])
+
         return (
-            f"A candid photograph of a {gender_word} in their mid-twenties to mid-thirties, "
-            f"captured from a laptop webcam during a video interview. "
-            f"They are sitting at a desk in a real lived-in room — maybe a bedroom, a small "
-            f"apartment, or a home office with everyday clutter slightly visible in the blurred "
-            f"background. Natural window light mixed with warm indoor lighting. "
+            f"A candid webcam photograph of a person named {name}. "
+            f"They are a {cultural_bg + ' ' if cultural_bg else ''}{gender_word}, "
+            f"around {age} years old, with {hair}. "
+            f"Captured from a laptop webcam during a video interview. "
+            f"They are sitting in {room}. "
+            f"They are wearing {clothing}. "
+            f"They have {expression} — like someone in a real job interview. "
             f"The webcam angle is slightly above eye level, typical of a laptop camera. "
-            f"The person is looking directly into the camera with a natural, slightly nervous "
-            f"but friendly expression — like someone in a real job interview. "
-            f"They are wearing casual-professional clothes (a simple shirt or sweater). "
+            f"Natural window light mixed with warm indoor lighting. "
             f"Skin texture, minor imperfections, and natural hair are visible. "
             f"No makeup filters, no beauty retouching, no studio lighting. "
             f"The image looks exactly like a still frame from a real Zoom or Google Meet call. "
@@ -252,11 +293,13 @@ async def join_meeting(request: BotRequest, client_request: Request):
             f"{image_prompt}"
         )
         is_raw = bool(resolved_persona_data.get("is_randomized_candidate"))
+        image_size = (1536, 1024) if is_raw else (1024, 1024)
         try:
             generated_image = await image_service.generate_persona_image(
                 name=resolved_persona_data.get("name", "Bot"),
                 prompt=image_prompt,
                 raw_prompt=is_raw,
+                size=image_size,
             )
             if generated_image:
                 resolved_persona_data["image"] = generated_image
