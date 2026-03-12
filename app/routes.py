@@ -5,11 +5,10 @@ import random
 import time
 import uuid
 from datetime import datetime
-from io import BytesIO
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, Optional
 
 from fastapi import APIRouter, HTTPException, Request, status
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.responses import JSONResponse
 
 from app.models import (
     BotRequest,
@@ -297,47 +296,10 @@ async def join_meeting(request: BotRequest, client_request: Request):
         streaming_audio_frequency
     )
 
-    # Get image URL: Prioritize request.bot_image > persona_data.image > generate_image (if custom prompt and details derived)
     bot_image = request.bot_image
-    if not bot_image:
-        # Check persona data first (whether existing or temporary)
-        if resolved_persona_data.get("image"):
-             # Ensure the image is a string
-            try:
-                bot_image = str(resolved_persona_data.get("image"))
-                logger.info(f"Using persona image from resolved persona data: {bot_image}")
-            except Exception as e:
-                logger.error(f"Error converting persona image from resolved persona data to string: {e}")
-                bot_image = None
-        elif request.prompt and prompt_derived_details:
-            logger.info(
-                "Generating image from prompt-derived details…"
-            )
-            try:
-                image_prompt = _build_image_prompt(
-                    prompt_derived_details
-                )
-                generated_image_url = (
-                    await image_service.generate_persona_image(
-                        name=prompt_derived_details.get("name", "Bot"),
-                        prompt=image_prompt,
-                    )
-                )
-                if generated_image_url:
-                    bot_image = generated_image_url
-                    logger.info(f"Generated image: {bot_image}")
-                else:
-                    logger.warning(
-                        "Image generation from derived details "
-                        "returned no URL."
-                    )
-                    bot_image = None
-            except Exception as e:
-                logger.error(
-                    f"Failed to generate image from derived "
-                    f"details: {e}"
-                )
-                bot_image = None
+    if not bot_image and resolved_persona_data.get("image"):
+        bot_image = str(resolved_persona_data["image"])
+        logger.info(f"Using persona image from resolved persona data: {bot_image}")
 
     # Convert local /static/ paths to full external URLs
     bot_image_str = str(bot_image) if bot_image is not None else None

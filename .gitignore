@@ -163,3 +163,7 @@ cython_debug/
 
 # MacOSX
 .DS_Store
+
+# Generated avatar images (kept at runtime, not in repo)
+static/avatars/*
+!static/avatars/.gitkeep

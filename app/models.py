@@ -51,12 +51,6 @@ class JoinResponse(BaseModel):
     )
 
 
-class LeaveResponse(BaseModel):
-    """Response model for a bot leaving a meeting"""
-
-    ok: bool
-
-
 class LeaveBotRequest(BaseModel):
     """Request model for making a bot leave a meeting"""
 
