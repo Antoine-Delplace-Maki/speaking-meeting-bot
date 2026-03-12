@@ -36,6 +36,7 @@ class ImageService:
         prompt: str,
         style: str = "realistic",
         size: tuple[int, int] = (1024, 1024),
+        raw_prompt: bool = False,
     ) -> str:
         """Generate a persona headshot and return its URL.
 
@@ -45,6 +46,8 @@ class ImageService:
             style: Artistic style hint prepended to the prompt.
             size: Desired dimensions (mapped to nearest DALL-E 3
                 size: 1024x1024, 1024x1792, or 1792x1024).
+            raw_prompt: If True, use ``prompt`` as-is without
+                wrapping it in the default headshot framing.
 
         Returns:
             A URL pointing to the generated image, or an empty
@@ -55,12 +58,15 @@ class ImageService:
             return ""
 
         dall_e_size = _pick_dalle_size(size)
-        full_prompt = (
-            f"Professional headshot portrait of a person named {name}. "
-            f"Style: {style}. {prompt}. "
-            "Single person, face and shoulders, centered, "
-            "neutral background, no text or watermarks."
-        )
+        if raw_prompt:
+            full_prompt = prompt
+        else:
+            full_prompt = (
+                f"Professional headshot portrait of a person named {name}. "
+                f"Style: {style}. {prompt}. "
+                "Single person, face and shoulders, centered, "
+                "neutral background, no text or watermarks."
+            )
         if len(full_prompt) > _MAX_PROMPT_LENGTH:
             full_prompt = full_prompt[:_MAX_PROMPT_LENGTH]
 

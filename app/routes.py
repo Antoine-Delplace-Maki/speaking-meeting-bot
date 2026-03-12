@@ -59,12 +59,23 @@ router = APIRouter()
 def _build_image_prompt(persona: dict) -> str:
     """Build a short, appearance-only prompt for image generation.
 
-    Avoids passing the full system prompt (which contains behavioural
-    instructions that trip content-policy filters).
+    For randomized candidates, produces a realistic webcam interview look.
+    For other personas, produces a standard appearance prompt.
     """
     name = persona.get("name", "a professional")
     gender = persona.get("gender", "")
     characteristics = persona.get("characteristics", [])
+
+    if persona.get("is_randomized_candidate"):
+        gender_word = gender.lower() if gender else "person"
+        return (
+            f"Realistic photograph taken from a laptop webcam during a video call interview. "
+            f"A {gender_word} named {name} is sitting at a desk, looking directly at the camera. "
+            f"Slightly elevated webcam angle, natural indoor lighting, casual home office or "
+            f"living room background slightly out of focus. The person looks natural and relaxed "
+            f"but professional, as if on a real Zoom or Google Meet call. "
+            f"Photorealistic, candid, no studio lighting, no filters."
+        )
 
     parts = [f"A friendly {gender.lower()} professional" if gender else "A friendly professional"]
 
@@ -222,10 +233,12 @@ async def join_meeting(request: BotRequest, client_request: Request):
             f"Generating image for '{persona_name_for_logging}': "
             f"{image_prompt}"
         )
+        is_raw = bool(resolved_persona_data.get("is_randomized_candidate"))
         try:
             generated_image = await image_service.generate_persona_image(
                 name=resolved_persona_data.get("name", "Bot"),
                 prompt=image_prompt,
+                raw_prompt=is_raw,
             )
             if generated_image:
                 resolved_persona_data["image"] = generated_image
