@@ -3,6 +3,7 @@
 import os
 import subprocess
 import sys
+import tempfile
 import time
 from typing import Any, Dict
 import json
@@ -11,6 +12,34 @@ import threading
 from meetingbaas_pipecat.utils.logger import logger
 
 PIPECAT_PROCESSES: Dict[str, subprocess.Popen] = {}
+
+
+def get_greeting_trigger_path(client_id: str) -> str:
+    """Return the path to the file used to signal pipecat to start greeting."""
+    return os.path.join(tempfile.gettempdir(), f"pipecat_greet_{client_id}")
+
+
+def trigger_greeting(client_id: str) -> bool:
+    """Write the trigger file so the pipecat process sends its greeting."""
+    path = get_greeting_trigger_path(client_id)
+    try:
+        with open(path, "w") as f:
+            f.write("1")
+        logger.info(f"[trigger] Greeting trigger written for {client_id}")
+        return True
+    except Exception as e:
+        logger.error(f"[trigger] Failed to write greeting trigger for {client_id}: {e}")
+        return False
+
+
+def cleanup_greeting_trigger(client_id: str):
+    """Remove the trigger file if it exists."""
+    path = get_greeting_trigger_path(client_id)
+    try:
+        if os.path.exists(path):
+            os.remove(path)
+    except OSError:
+        pass
 
 def stream_output(pipe, prefix):
     for line in iter(pipe.readline, ''):
@@ -25,6 +54,7 @@ def start_pipecat_process(
     enable_tools: bool,
     api_key: str = "",
     meetingbaas_bot_id: str = "",
+    greeting_trigger_file: str = "",
 ) -> subprocess.Popen:
     """
     Start a Pipecat process for a client.
@@ -38,6 +68,7 @@ def start_pipecat_process(
         enable_tools: Whether to enable function calling tools
         api_key: API key for authentication
         meetingbaas_bot_id: ID of the meetingbaas bot
+        greeting_trigger_file: Path to file that signals when to send the greeting
 
     Returns:
         The subprocess.Popen object for the started process
@@ -80,6 +111,9 @@ def start_pipecat_process(
 
     if meetingbaas_bot_id:
         command.extend(["--meetingbaas-bot-id", meetingbaas_bot_id])
+
+    if greeting_trigger_file:
+        command.extend(["--greeting-trigger-file", greeting_trigger_file])
 
     # Start the process
     process = subprocess.Popen(

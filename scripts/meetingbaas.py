@@ -105,6 +105,7 @@ async def main(
     websocket_url: str = "",
     enable_tools: bool = True,
     persona_data_override: dict = None,
+    greeting_trigger_file: str = "",
 ):
     """
     Run the MeetingBaas bot with specified configurations
@@ -349,13 +350,41 @@ async def main(
         }
 
         async def queue_initial_message():
-            delay = 1
-            log_and_flush(
-                logging.INFO,
-                f"[BOT] Waiting {delay}s for transport "
-                f"to connect before greeting",
-            )
-            await asyncio.sleep(delay)
+            if greeting_trigger_file:
+                log_and_flush(
+                    logging.INFO,
+                    f"[BOT] Waiting for greeting trigger: {greeting_trigger_file}",
+                )
+                timeout = 600
+                poll_interval = 0.05
+                waited = 0.0
+                while waited < timeout:
+                    if os.path.exists(greeting_trigger_file):
+                        try:
+                            os.remove(greeting_trigger_file)
+                        except OSError:
+                            pass
+                        log_and_flush(
+                            logging.INFO,
+                            f"[BOT] Greeting trigger received after {waited:.1f}s",
+                        )
+                        break
+                    await asyncio.sleep(poll_interval)
+                    waited += poll_interval
+                else:
+                    log_and_flush(
+                        logging.WARNING,
+                        f"[BOT] Greeting trigger timeout after {timeout}s",
+                    )
+            else:
+                delay = 1
+                log_and_flush(
+                    logging.INFO,
+                    f"[BOT] Waiting {delay}s for transport "
+                    f"to connect before greeting",
+                )
+                await asyncio.sleep(delay)
+
             log_and_flush(
                 logging.INFO,
                 f"[BOT] Queuing initial message: "
@@ -422,6 +451,11 @@ if __name__ == "__main__":
     parser.add_argument("--persona-data-json", help="Persona data as JSON string")
     parser.add_argument("--api-key", help="API key for authentication")
     parser.add_argument("--meetingbaas-bot-id", help="MeetingBaas bot ID")
+    parser.add_argument(
+        "--greeting-trigger-file",
+        default="",
+        help="Path to file that signals when to send the initial greeting",
+    )
 
     args = parser.parse_args()
 
@@ -457,5 +491,6 @@ if __name__ == "__main__":
             websocket_url=args.websocket_url,
             enable_tools=args.enable_tools,
             persona_data_override=persona_data_override,
+            greeting_trigger_file=args.greeting_trigger_file,
         )
     )

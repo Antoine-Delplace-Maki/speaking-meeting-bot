@@ -30,7 +30,13 @@ from core.connection import (
     TERMINAL_STATUSES,
     registry,
 )
-from core.process import start_pipecat_process, terminate_process_gracefully
+from core.process import (
+    cleanup_greeting_trigger,
+    get_greeting_trigger_path,
+    start_pipecat_process,
+    terminate_process_gracefully,
+    trigger_greeting,
+)
 from core.router import router as message_router
 
 # Import from the app module (will be defined in __init__.py)
@@ -396,7 +402,8 @@ async def join_meeting(request: BotRequest, client_request: Request):
             f"ws://127.0.0.1:{INTERNAL_PORT}"
             f"/pipecat/{bot_client_id}"
         )
-        PENDING_PIPECAT_PARAMS[bot_client_id] = {
+        greeting_trigger_file = get_greeting_trigger_path(bot_client_id)
+        pipecat_params = {
             "websocket_url": pipecat_ws_url,
             "meeting_url": request.meeting_url,
             "persona_data": resolved_persona_data,
@@ -404,12 +411,27 @@ async def join_meeting(request: BotRequest, client_request: Request):
             "enable_tools": request.enable_tools,
             "api_key": api_key,
             "meetingbaas_bot_id": meetingbaas_bot_id,
+            "greeting_trigger_file": greeting_trigger_file,
         }
 
-        logger.info(
-            "Pipecat process deferred until bot joins the "
-            "meeting (webhook: in_call_recording)"
-        )
+        # Store params as fallback in case the early start fails
+        PENDING_PIPECAT_PARAMS[bot_client_id] = pipecat_params
+
+        try:
+            process = start_pipecat_process(
+                client_id=bot_client_id, **pipecat_params
+            )
+            PIPECAT_PROCESSES[bot_client_id] = process
+            logger.info(
+                "Pipecat process pre-started "
+                "(will greet when bot joins the meeting)"
+            )
+        except Exception as e:
+            logger.error(f"Failed to pre-start Pipecat: {e}")
+            logger.info(
+                "Pipecat process deferred until bot joins "
+                "the meeting (webhook: in_call_recording)"
+            )
 
         return JoinResponse(bot_id=meetingbaas_bot_id)
     else:
@@ -631,7 +653,7 @@ async def generate_persona_image(request: PersonaImageRequest) -> PersonaImageRe
 
 
 def _maybe_start_pipecat(meetingbaas_bot_id: str) -> None:
-    """Start the Pipecat process if launch params are pending."""
+    """Start the Pipecat process (or trigger its greeting if pre-started)."""
     client_id = BOT_ID_TO_CLIENT.get(meetingbaas_bot_id)
     if not client_id:
         logger.warning(
@@ -645,9 +667,13 @@ def _maybe_start_pipecat(meetingbaas_bot_id: str) -> None:
         if proc.poll() is None:
             logger.info(
                 f"[webhook] Pipecat already running for "
-                f"{client_id}"
+                f"{client_id}, triggering greeting"
             )
+            trigger_greeting(client_id)
+            PENDING_PIPECAT_PARAMS.pop(client_id, None)
             return
+        else:
+            PIPECAT_PROCESSES.pop(client_id, None)
 
     params = PENDING_PIPECAT_PARAMS.pop(client_id, None)
     if not params:
@@ -661,6 +687,7 @@ def _maybe_start_pipecat(meetingbaas_bot_id: str) -> None:
         client_id=client_id, **params
     )
     PIPECAT_PROCESSES[client_id] = process
+    trigger_greeting(client_id)
     logger.info(
         f"[webhook] Started Pipecat for bot "
         f"{meetingbaas_bot_id} (client {client_id})"
@@ -674,6 +701,7 @@ def _cleanup_bot(meetingbaas_bot_id: str) -> None:
         return
 
     PENDING_PIPECAT_PARAMS.pop(client_id, None)
+    cleanup_greeting_trigger(client_id)
 
     if client_id in PIPECAT_PROCESSES:
         process = PIPECAT_PROCESSES.pop(client_id)
