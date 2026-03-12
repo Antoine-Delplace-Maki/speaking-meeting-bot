@@ -479,9 +479,9 @@ async def main(
         if _leave_after_goodbye and meetingbaas_bot_id and api_key:
             log_and_flush(
                 logging.INFO,
-                "[LEAVE] Goodbye complete, waiting 2 seconds before leaving...",
+                "[LEAVE] Goodbye complete, leaving shortly...",
             )
-            await asyncio.sleep(2)
+            await asyncio.sleep(0.5)
             try:
                 from scripts.meetingbaas_api import leave_meeting_bot
 

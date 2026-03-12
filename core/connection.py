@@ -40,7 +40,7 @@ CLEANUP_REMEMBER_SECONDS = 300
 # client_id -> MeetingMonitor instance (auto-leave tracking)
 MEETING_MONITORS: Dict[str, Any] = {}
 
-TERMINAL_STATUSES = frozenset({"call_ended", "fatal_error"})
+TERMINAL_STATUSES = frozenset({"call_ended", "fatal_error", "api_request_stop"})
 IN_CALL_STATUSES = frozenset({
     "in_call_recording",
     "in_call_not_recording",

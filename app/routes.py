@@ -731,7 +731,7 @@ def _maybe_start_pipecat(meetingbaas_bot_id: str) -> None:
     )
 
 
-def _cleanup_bot(meetingbaas_bot_id: str) -> None:
+async def _cleanup_bot(meetingbaas_bot_id: str) -> None:
     """Clean up all resources for a bot after a terminal event."""
     client_id = BOT_ID_TO_CLIENT.get(meetingbaas_bot_id)
     if not client_id:
@@ -771,6 +771,12 @@ def _cleanup_bot(meetingbaas_bot_id: str) -> None:
 
     CLEANED_UP_CLIENTS[client_id] = time.monotonic()
     message_router.mark_closing(client_id)
+
+    for is_pipecat in (True, False):
+        try:
+            await registry.disconnect(client_id, is_pipecat=is_pipecat)
+        except Exception:
+            pass
 
     logger.info(
         f"[cleanup] Cleaned up bot {meetingbaas_bot_id} "
@@ -813,13 +819,13 @@ async def meetingbaas_webhook(request: Request):
             if status_code in IN_CALL_STATUSES:
                 _maybe_start_pipecat(bot_id)
             elif status_code in TERMINAL_STATUSES:
-                _cleanup_bot(bot_id)
+                await _cleanup_bot(bot_id)
 
         elif event == "bot.completed":
             logger.info(
                 f"[webhook] bot.completed  bot_id={bot_id}"
             )
-            _cleanup_bot(bot_id)
+            await _cleanup_bot(bot_id)
 
         elif event == "bot.failed":
             error_code = data.get("error_code", "unknown")
@@ -828,7 +834,7 @@ async def meetingbaas_webhook(request: Request):
                 f"[webhook] bot.failed  bot_id={bot_id}  "
                 f"error={error_code}: {error_msg}"
             )
-            _cleanup_bot(bot_id)
+            await _cleanup_bot(bot_id)
 
         elif event in ("participant.joined", "bot.participant_joined"):
             client_id = BOT_ID_TO_CLIENT.get(bot_id)
