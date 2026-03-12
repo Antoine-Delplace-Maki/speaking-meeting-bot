@@ -67,17 +67,18 @@ async def websocket_endpoint(
     websocket: WebSocket, client_id: str
 ):
     """Handle WebSocket connections from MeetingBaas clients."""
-    await registry.connect(websocket, client_id)
-
     if _is_stale_client(client_id):
         logger.info(
             f"Ignoring reconnection from terminal client "
             f"{client_id}"
         )
+        await websocket.accept()
         await websocket.close(
-            code=1000, reason="Session already ended"
+            code=4410, reason="Session already ended"
         )
         return
+
+    await registry.connect(websocket, client_id)
 
     message_router.unmark_closing(client_id)
     logger.info(f"Client {client_id} connected")
@@ -194,8 +195,16 @@ async def websocket_endpoint(
             f"(repr: {repr(e)})"
         )
     finally:
+        already_cleaned = (
+            client_id in CLEANED_UP_CLIENTS
+            or internal_client_id in CLEANED_UP_CLIENTS
+        )
+
         bot_status = _get_bot_status(internal_client_id)
-        is_terminal = bot_status in TERMINAL_STATUSES
+        is_terminal = (
+            bot_status in TERMINAL_STATUSES
+            or already_cleaned
+        )
 
         if is_terminal:
             CLEANED_UP_CLIENTS[client_id] = time.monotonic()
