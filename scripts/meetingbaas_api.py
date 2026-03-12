@@ -29,12 +29,20 @@ class TimeoutConfig(BaseModel):
     silence_timeout: int = 600
 
 
-class StreamingConfig(BaseModel):
-    """WebSocket streaming configuration."""
+_FREQ_MAP: dict[str, int] = {
+    "16khz": 16000,
+    "24khz": 24000,
+    "32khz": 32000,
+    "48khz": 48000,
+}
 
-    input: str
-    output: str
-    audio_frequency: str = "16khz"
+
+class StreamingConfig(BaseModel):
+    """WebSocket streaming configuration (v2 field names)."""
+
+    input_url: Optional[str] = None
+    output_url: Optional[str] = None
+    audio_frequency: int = 16000
 
 
 class CallbackConfig(BaseModel):
@@ -115,10 +123,13 @@ def create_meeting_bot(
         bot_image = str(bot_image)
 
     ws_path = f"{websocket_url}/ws/{bot_id}"
+    freq_hz = _FREQ_MAP.get(
+        streaming_audio_frequency, 16000
+    )
     streaming_config = StreamingConfig(
-        input=ws_path,
-        output=ws_path,
-        audio_frequency=streaming_audio_frequency,
+        input_url=ws_path,
+        output_url=ws_path,
+        audio_frequency=freq_hz,
     )
 
     callback_config = None
