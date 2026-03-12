@@ -99,7 +99,7 @@ async def get_time(params: FunctionCallParams):
 async def main(
     meeting_url: str = "",
     persona_name: str = "Meeting Bot",
-    entry_message: str = "Hello, I am the meeting bot",
+    entry_message: str = "",
     bot_image: str = "",
     streaming_audio_frequency: str = "24khz",
     websocket_url: str = "",
@@ -331,6 +331,13 @@ async def main(
     task = PipelineTask(pipeline, params=PipelineParams(allow_interruptions=True, check_dangling_tasks=True))
     runner = PipelineRunner()
 
+    if not entry_message and persona_data_override and persona_data_override.get("is_randomized_candidate"):
+        entry_message = (
+            "You've just been let into the video call for your interview. "
+            "The interviewer is already here and can see you. "
+            "Greet them naturally and briefly introduce yourself."
+        )
+
     if entry_message:
         log_and_flush(
             logging.INFO,
@@ -393,7 +400,7 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "--entry-message",
-        default="Hello, I am the meeting bot",
+        default="",
         help="Message to send when joining",
     )
     parser.add_argument("--bot-image", default="", help="URL for bot avatar")
