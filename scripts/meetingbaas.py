@@ -187,9 +187,37 @@ async def main(
     )
     log_and_flush(logging.INFO, f"[TTS] Cartesia TTS initialized with sample_rate={output_sample_rate}, voice_id={voice_id}")
 
+    system_content = persona["prompt"]
+    if additional_content:
+        system_content += (
+            f"\n\nYou are {persona_name}\n\n"
+            f"{DEFAULT_SYSTEM_PROMPT}\n\n"
+            "You have the following additional context."
+            " USE IT TO INFORM YOUR RESPONSES:\n\n"
+            f"{additional_content}"
+            "You are a meeting bot. You are in a meeting"
+            " with a group of people. You are here to"
+            " help the group. You are not the host of"
+            " the meeting. You are not the organizer of"
+            " the meeting. You are not the participant"
+            " in the meeting. You are the meeting bot."
+            "YOU ARE HELP TO HELP. KEEP IT SHORT."
+            " EVERYTHING YOU SAY WILL BE REPEATED BACK"
+            " TO THE GROUP OUT LOUD so DO NOT add"
+            " PUNCTUATION OR CAPS. JUST SAY WHAT YOU"
+            " NEED TO SAY IN A CONCISE MANNER."
+        )
+    log_and_flush(
+        logging.INFO,
+        f"[PERSONA] System prompt length: {len(system_content)} chars",
+    )
+
     llm = OpenAILLMService(
         api_key=os.getenv("OPENAI_API_KEY"),
-        settings=OpenAILLMService.Settings(model="gpt-4.1"),
+        settings=OpenAILLMService.Settings(
+            model="gpt-4.1",
+            system_instruction=system_content,
+        ),
     )
     log_and_flush(logging.INFO, "[LLM] OpenAI LLM initialized with model=gpt-4.1")
 
@@ -253,28 +281,7 @@ async def main(
     bot_name = persona_name or "Bot"
     log_and_flush(logging.INFO, f"[BOT] Using bot name: {bot_name}")
 
-    # Create a more comprehensive system prompt
-    system_content = persona["prompt"]
-
-    # Add additional context if available
-    if additional_content:
-        system_content += f"\n\nYou are {persona_name}\n\n{DEFAULT_SYSTEM_PROMPT}\n\n"
-        system_content += "You have the following additional context. USE IT TO INFORM YOUR RESPONSES:\n\n"
-        system_content += additional_content
-        system_content += "You are a meeting bot. You are in a meeting with a group of people. You are here to help the group. You are not the host of the meeting. You are not the organizer of the meeting. You are not the participant in the meeting. You are the meeting bot."
-        system_content += "YOU ARE HELP TO HELP. KEEP IT SHORT. EVERYTHING YOU SAY WILL BE REPEATED BACK TO THE GROUP OUT LOUD so DO NOT add PUNCTUATION OR CAPS. JUST SAY WHAT YOU NEED TO SAY IN A CONCISE MANNER."
-
-
-    # Set up messages
-    messages = [
-        {
-            "role": "system",
-            "content": system_content,
-        },
-    ]
-
     context = LLMContext(
-        messages=messages,
         tools=tools if enable_tools and tools else None,
     )
 
