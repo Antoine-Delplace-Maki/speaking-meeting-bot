@@ -25,7 +25,9 @@ pipecat_ws_logger = logging.getLogger("pipecat.transports.websocket.client")
 pipecat_ws_logger.setLevel(logging.WARNING)
 
 
-_AUTH_SKIP_PATHS = frozenset(["/docs", "/openapi.json", "/redoc", "/health"])
+_AUTH_SKIP_PATHS = frozenset(
+    ["/docs", "/openapi.json", "/redoc", "/health", "/webhook"]
+)
 
 
 async def api_key_middleware(request: Request, call_next):

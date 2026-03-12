@@ -571,14 +571,42 @@ async def generate_persona_image(request: PersonaImageRequest) -> PersonaImageRe
     status_code=status.HTTP_200_OK,
 )
 async def meetingbaas_webhook(request: Request):
-    """
-    Webhook endpoint for MeetingBaas callbacks.
+    """Webhook/callback endpoint for MeetingBaas v2 events.
 
-    Receives events like bot_joined, bot_left, transcription, etc.
+    Receives events such as bot.status_change, bot.completed,
+    and bot.failed.  The v2 payload structure is:
+
+        {"event": "<type>", "data": {...}, "sent_at": "..."}
     """
     try:
         body = await request.json()
-        logger.info(f"Received MeetingBaas webhook: {body}")
+        event = body.get("event", "unknown")
+        data = body.get("data", {})
+        bot_id = data.get("bot_id", "unknown")
+
+        if event == "bot.status_change":
+            new_status = data.get("status", "unknown")
+            logger.info(
+                f"[webhook] bot.status_change  "
+                f"bot_id={bot_id}  status={new_status}"
+            )
+        elif event == "bot.completed":
+            logger.info(
+                f"[webhook] bot.completed  bot_id={bot_id}"
+            )
+        elif event == "bot.failed":
+            error_code = data.get("error_code", "unknown")
+            error_msg = data.get("error_message", "")
+            logger.warning(
+                f"[webhook] bot.failed  bot_id={bot_id}  "
+                f"error={error_code}: {error_msg}"
+            )
+        else:
+            logger.info(
+                f"[webhook] {event}  bot_id={bot_id}  "
+                f"payload_keys={list(data.keys())}"
+            )
+
         return {"status": "ok"}
     except Exception as e:
         logger.error(f"Error processing webhook: {e}")

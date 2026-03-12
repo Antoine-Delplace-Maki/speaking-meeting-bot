@@ -1,89 +1,85 @@
+"""MeetingBaas v2 API client for bot lifecycle management."""
+
 import json
 import logging
 from enum import Enum
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, Optional
 
 import requests
-from pydantic import BaseModel, Field, HttpUrl
+from pydantic import BaseModel, Field
 
 logger = logging.getLogger("meetingbaas-api")
 
+_BASE_URL = "https://api.meetingbaas.com/v2"
+
 
 class RecordingMode(str, Enum):
-    """Available recording modes for the MeetingBaas API"""
+    """Available recording modes for the MeetingBaas API."""
 
     SPEAKER_VIEW = "speaker_view"
+    AUDIO_ONLY = "audio_only"
     GALLERY_VIEW = "gallery_view"
-    SCREEN_SHARE = "screen_share"
 
 
-class AutomaticLeave(BaseModel):
-    """Settings for automatic leaving of meetings"""
+class TimeoutConfig(BaseModel):
+    """Timeout settings for automatic meeting exit."""
 
     waiting_room_timeout: int = 600
-    noone_joined_timeout: int = 0
+    no_one_joined_timeout: int = 600
+    silence_timeout: int = 600
 
 
-class SpeechToText(BaseModel):
-    """Speech to text settings"""
-
-    provider: str = "Gladia"
-    api_key: Optional[str] = None
-
-
-class Streaming(BaseModel):
-    """WebSocket streaming configuration"""
+class StreamingConfig(BaseModel):
+    """WebSocket streaming configuration."""
 
     input: str
     output: str
     audio_frequency: str = "16khz"
 
 
-def stringify_values(obj: Any) -> Any:
-    """
-    Recursively convert any values that might cause JSON serialization issues to strings.
+class CallbackConfig(BaseModel):
+    """Per-bot callback configuration."""
 
-    Args:
-        obj: Any Python object to stringify
-
-    Returns:
-        The object with all non-serializable values converted to strings
-    """
-    if isinstance(obj, dict):
-        return {k: stringify_values(v) for k, v in obj.items()}
-    elif isinstance(obj, list):
-        return [stringify_values(item) for item in obj]
-    elif isinstance(obj, (str, int, float, bool, type(None))):
-        return obj
-    else:
-        # For any other type, convert to string
-        return str(obj)
+    url: str
+    method: str = "POST"
+    secret: Optional[str] = None
 
 
 class MeetingBaasRequest(BaseModel):
-    """
-    Complete model for MeetingBaas API request
-    Reference: https://docs.meetingbaas.com/api-reference/bots/join
+    """Model for the MeetingBaas v2 POST /v2/bots request.
+
+    Reference: https://docs.meetingbaas.com/api-v2/reference/bots/create-bot
     """
 
-    # Required fields
-    meeting_url: str
     bot_name: str
-    reserved: bool = False
-    streaming: Streaming  # Now a required field
+    meeting_url: str
 
-    # Optional fields with defaults
-    automatic_leave: AutomaticLeave = Field(default_factory=AutomaticLeave)
-    recording_mode: RecordingMode = RecordingMode.SPEAKER_VIEW
-
-    # Optional fields
-    bot_image: Optional[str] = None  # Changed from HttpUrl to str
-    deduplication_key: Optional[str] = None
+    bot_image: Optional[str] = None
     entry_message: Optional[str] = None
     extra: Optional[Dict[str, Any]] = None
-    speech_to_text: Optional[SpeechToText] = None
-    start_time: Optional[int] = None
-    webhook_url: Optional[str] = None
+    recording_mode: RecordingMode = RecordingMode.SPEAKER_VIEW
+    allow_multiple_bots: bool = True
+
+    timeout_config: TimeoutConfig = Field(
+        default_factory=TimeoutConfig
+    )
+
+    streaming_enabled: bool = False
+    streaming_config: Optional[StreamingConfig] = None
+
+    callback_enabled: bool = False
+    callback_config: Optional[CallbackConfig] = None
+
+
+def _stringify_values(obj: Any) -> Any:
+    """Recursively convert non-JSON-serializable values to strings."""
+    if isinstance(obj, dict):
+        return {k: _stringify_values(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_stringify_values(item) for item in obj]
+    if isinstance(obj, (str, int, float, bool, type(None))):
+        return obj
+    return str(obj)
 
 
 def create_meeting_bot(
@@ -97,147 +93,115 @@ def create_meeting_bot(
     extra: Optional[Dict[str, Any]] = None,
     streaming_audio_frequency: str = "16khz",
     webhook_url: Optional[str] = None,
-):
-    """
-    Direct API call to MeetingBaas to create a bot
+) -> Optional[str]:
+    """Create a bot via the MeetingBaas v2 API.
 
     Args:
-        meeting_url: URL of the meeting to join
-        websocket_url: Base WebSocket URL for audio streaming
-        bot_id: Unique identifier for the bot
-        persona_name: Name to display for the bot
-        api_key: MeetingBaas API key
-        bot_image: Optional URL for bot avatar
-        entry_message: Optional message to send when joining
-        extra: Optional additional metadata for the bot
-        streaming_audio_frequency: Audio frequency for streaming (16khz or 24khz)
+        meeting_url: URL of the meeting to join.
+        websocket_url: Base WebSocket URL for audio streaming.
+        bot_id: Internal client identifier (used in the WS path).
+        persona_name: Display name for the bot in the meeting.
+        api_key: MeetingBaas API key.
+        bot_image: Optional avatar URL (HTTPS, JPEG/PNG).
+        entry_message: Optional chat message on join.
+        extra: Optional custom metadata dict.
+        streaming_audio_frequency: "16khz" or "24khz".
+        webhook_url: Optional per-bot callback URL.
 
     Returns:
-        str: The bot ID if successful, None otherwise
+        The MeetingBaas bot_id on success, None on failure.
     """
-    # Ensure all inputs are primitive types to avoid serialization issues
     if bot_image is not None:
-        bot_image = str(bot_image)  # Ensure bot_image is a string
+        bot_image = str(bot_image)
 
-    # Create the WebSocket path for streaming
-    websocket_with_path = f"{websocket_url}/ws/{bot_id}"
-
-    # Create streaming config
-    streaming = Streaming(
-        input=websocket_with_path,
-        output=websocket_with_path,
+    ws_path = f"{websocket_url}/ws/{bot_id}"
+    streaming_config = StreamingConfig(
+        input=ws_path,
+        output=ws_path,
         audio_frequency=streaming_audio_frequency,
     )
 
-    # Create request model
+    callback_config = None
+    callback_enabled = False
+    if webhook_url:
+        callback_config = CallbackConfig(url=webhook_url)
+        callback_enabled = True
+
     request = MeetingBaasRequest(
         meeting_url=meeting_url,
         bot_name=persona_name,
-        reserved=False,
-        deduplication_key=f"{persona_name}-BaaS-{bot_id}",
-        streaming=streaming,
         bot_image=bot_image,
         entry_message=entry_message,
         extra=extra,
-        webhook_url=webhook_url,
+        streaming_enabled=True,
+        streaming_config=streaming_config,
+        callback_enabled=callback_enabled,
+        callback_config=callback_config,
     )
 
-    # Convert request to dict for the API call with custom handler for non-serializable types
-    try:
-        # First try the normal approach
-        config = request.model_dump(exclude_none=True)
-        # Make sure all values are serializable
-        config = stringify_values(config)
-    except Exception as e:
-        logger.warning(f"Error in model_dump: {e}, trying manual conversion")
-        # Fall back to manual conversion if that fails
-        config = {
-            "meeting_url": meeting_url,
-            "bot_name": persona_name,
-            "reserved": False,
-            "deduplication_key": f"{persona_name}-BaaS-{bot_id}",
-            "streaming": {
-                "input": websocket_with_path,
-                "output": websocket_with_path,
-                "audio_frequency": streaming_audio_frequency,
-            },
-        }
+    config = _stringify_values(
+        request.model_dump(exclude_none=True)
+    )
 
-        # Add optional fields
-        if bot_image:
-            config["bot_image"] = str(bot_image)
-        if entry_message:
-            config["entry_message"] = entry_message
-        if extra:
-            config["extra"] = extra
-
-        # Ensure all values are serializable
-        config = stringify_values(config)
-
-    url = "https://api.meetingbaas.com/bots"
+    url = f"{_BASE_URL}/bots"
     headers = {
         "Content-Type": "application/json",
         "x-meeting-baas-api-key": api_key,
     }
 
     try:
-        logger.info(f"Creating MeetingBaas bot for {meeting_url}")
-        logger.debug(f"Request payload: {config}")
-
-        # Try to serialize the payload to catch any JSON serialization issues
-        try:
-            json.dumps(config)
-        except TypeError as e:
-            logger.error(f"JSON serialization error: {e}")
-            # Use our stringify_values function to convert all non-serializable values
-            config = stringify_values(config)
-            logger.info("Applied stringify_values to fix JSON serialization issues")
+        logger.info(f"Creating MeetingBaas v2 bot for {meeting_url}")
+        logger.debug(f"Request payload: {json.dumps(config)}")
 
         response = requests.post(url, json=config, headers=headers)
+        data = response.json()
 
-        if response.status_code == 200:
-            data = response.json()
-            bot_id = data.get("bot_id")
-            logger.info(f"Bot created with ID: {bot_id}")
-            return bot_id
-        else:
-            logger.error(
-                f"Failed to create bot: {response.status_code} - {response.text}"
-            )
-            return None
+        if response.status_code == 201 and data.get("success"):
+            result_bot_id = data["data"]["bot_id"]
+            logger.info(f"Bot created with ID: {result_bot_id}")
+            return result_bot_id
+
+        error_code = data.get("code", "unknown")
+        error_msg = data.get("message", response.text)
+        logger.error(
+            f"Failed to create bot: {response.status_code} "
+            f"[{error_code}] {error_msg}"
+        )
+        return None
     except Exception as e:
-        logger.error(f"Error creating bot: {str(e)}")
+        logger.error(f"Error creating bot: {e}")
         return None
 
 
 def leave_meeting_bot(bot_id: str, api_key: str) -> bool:
-    """
-    Call the MeetingBaas API to make a bot leave a meeting.
+    """Tell a bot to leave its meeting via the v2 API.
 
     Args:
-        bot_id: The ID of the bot to remove
-        api_key: MeetingBaas API key
+        bot_id: The MeetingBaas bot UUID.
+        api_key: MeetingBaas API key.
 
     Returns:
-        bool: True if successful, False otherwise
+        True on success, False otherwise.
     """
-    url = f"https://api.meetingbaas.com/bots/{bot_id}"
-    headers = {
-        "x-meeting-baas-api-key": api_key,
-    }
+    url = f"{_BASE_URL}/bots/{bot_id}/leave"
+    headers = {"x-meeting-baas-api-key": api_key}
 
     try:
-        logger.info(f"Removing bot with ID: {bot_id}")
-        response = requests.delete(url, headers=headers)
+        logger.info(f"Requesting bot {bot_id} to leave meeting")
+        response = requests.post(url, headers=headers)
+        data = response.json()
 
-        if response.status_code == 200:
+        if response.status_code == 200 and data.get("success"):
             logger.info(f"Bot {bot_id} successfully left the meeting")
             return True
-        else:
-            logger.error(
-                f"Failed to remove bot: {response.status_code} - {response.text}"
-            )
-            return False
+
+        error_code = data.get("code", "unknown")
+        error_msg = data.get("message", response.text)
+        logger.error(
+            f"Failed to remove bot: {response.status_code} "
+            f"[{error_code}] {error_msg}"
+        )
+        return False
     except Exception as e:
-        logger.error(f"Error removing bot: {str(e)}")
+        logger.error(f"Error removing bot: {e}")
         return False

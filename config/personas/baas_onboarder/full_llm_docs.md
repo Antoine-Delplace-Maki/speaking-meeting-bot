@@ -318,13 +318,13 @@ x-meeting-baas-api-key: YOUR-API-KEY
 
 The failure types can be:
 
-| Error                 | Description                                                                                                                                                                                                    |
-| --------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| CannotJoinMeeting     | The bot could not join the meeting URL provided.                                                                                                                                                               |
-| TimeoutWaitingToStart | The bot has quit after waiting to be accepted. By default this is 10 minutes, configurable via `automatic_leave.waiting_room_timeout` or `automatic_leave.noone_joined_timeout` (both default to 600 seconds). |
-| BotNotAccepted        | The bot has been refused in the meeting.                                                                                                                                                                       |
-| InternalError         | An unexpected error occurred. Please contact us if the issue persists.                                                                                                                                         |
-| InvalidMeetingUrl     | The meeting URL provided is not a valid (Zoom, Meet, Teams) URL.                                                                                                                                               |
+| Error                 | Description                                                                                                                                                                                                         |
+| --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| CannotJoinMeeting     | The bot could not join the meeting URL provided.                                                                                                                                                                    |
+| TimeoutWaitingToStart | The bot has quit after waiting to be accepted. By default this is 10 minutes, configurable via `timeout_config.waiting_room_timeout` or `timeout_config.no_one_joined_timeout` (both default to 600 seconds).       |
+| BotNotAccepted        | The bot has been refused in the meeting.                                                                                                                                                                            |
+| InternalError         | An unexpected error occurred. Please contact us if the issue persists.                                                                                                                                              |
+| InvalidMeetingUrl     | The meeting URL provided is not a valid (Zoom, Meet, Teams) URL.                                                                                                                                                    |
 
 file: ./content/docs/api/getting-started/removing-a-bot.mdx
 
@@ -334,12 +334,12 @@ Learn how to remove a bot from an ongoing meeting using the API
 
 import { Tab, Tabs } from "fumadocs-ui/components/tabs";
 
-If you want to remove a bot from a meeting, send a DELETE request to [https://api.meetingbaas.com/bots](https://api.meetingbaas.com/bots) with the bot identifier:
+If you want to remove a bot from a meeting, send a POST request to `https://api.meetingbaas.com/v2/bots/YOUR_BOT_ID/leave` with the bot identifier:
 
 <Tabs items={['Bash', 'Python', 'JavaScript']}>
 <Tab value="Bash">
 `bash title="leave_meeting.sh"
-    curl -X DELETE "https://api.meetingbaas.com/bots/YOUR_BOT_ID" \
+    curl -X POST "https://api.meetingbaas.com/v2/bots/YOUR_BOT_ID/leave" \
          -H "Content-Type: application/json" \
          -H "x-meeting-baas-api-key: YOUR-API-KEY"
     `
@@ -350,17 +350,18 @@ If you want to remove a bot from a meeting, send a DELETE request to [https://ap
     import requests
 
     bot_id = "YOUR_BOT_ID"
-    url = f"https://api.meetingbaas.com/bots/{bot_id}"
+    url = f"https://api.meetingbaas.com/v2/bots/{bot_id}/leave"
     headers = {
         "Content-Type": "application/json",
         "x-meeting-baas-api-key": "YOUR-API-KEY",
     }
 
-    response = requests.delete(url, headers=headers)
-    if response.status_code == 200:
+    response = requests.post(url, headers=headers)
+    data = response.json()
+    if data.get("success"):
         print("Bot successfully removed from the meeting.")
     else:
-        print("Failed to remove the bot:", response.json())
+        print("Failed to remove the bot:", data)
     ```
 
   </Tab>
@@ -368,18 +369,19 @@ If you want to remove a bot from a meeting, send a DELETE request to [https://ap
   <Tab value="JavaScript">
     ```javascript title="leave_meeting.js"
     const botId = "YOUR_BOT_ID";
-    fetch(`https://api.meetingbaas.com/bots/${botId}`, {
-      method: "DELETE",
+    fetch(`https://api.meetingbaas.com/v2/bots/${botId}/leave`, {
+      method: "POST",
       headers: {
         "Content-Type": "application/json",
         "x-meeting-baas-api-key": "YOUR-API-KEY",
       },
     })
-      .then((response) => {
-        if (response.ok) {
+      .then((response) => response.json())
+      .then((data) => {
+        if (data.success) {
           console.log("Bot successfully removed from the meeting.");
         } else {
-          console.error("Failed to remove the bot:", response.statusText);
+          console.error("Failed to remove the bot:", data.message);
         }
       })
       .catch((error) => console.error("Error:", error));
@@ -391,13 +393,13 @@ Both API key and bot ID are mandatory.
 
 The bot will leave the meeting and you will get the meeting data up to this point.
 
-Expect us to reply simply with:
+Expect a v2 standardized response:
 
 ```http
 HTTP/2 200
 Content-Type: application/json
 
-{ "ok": true }
+{ "success": true, "data": { ... } }
 ```
 
 file: ./content/docs/api/getting-started/sending-a-bot.mdx
@@ -413,12 +415,12 @@ You can summon a bot:
 1. Immediately to a meeting, provided your bot pool is sufficient.
 2. Or reserve one to come in 4 minutes.
 
-Here's an example POST request to [https://api.meetingbaas.com/bots](https://api.meetingbaas.com/bots), sending a bot to a meeting:
+Here's an example POST request to `https://api.meetingbaas.com/v2/bots`, sending a bot to a meeting:
 
 <Tabs items={['Bash', 'Python', 'JavaScript']}>
 <Tab value="Bash">
 `bash title="join_meeting.sh"
-    curl -X POST "https://api.meetingbaas.com/bots" \
+    curl -X POST "https://api.meetingbaas.com/v2/bots" \
          -H "Content-Type: application/json" \
          -H "x-meeting-baas-api-key: YOUR-API-KEY" \
          -d '{
@@ -427,12 +429,14 @@ Here's an example POST request to [https://api.meetingbaas.com/bots](https://api
                "recording_mode": "speaker_view",
                "bot_image": "https://example.com/bot.jpg",
                "entry_message": "I am a good meeting bot :)",
-               "reserved": false,
-               "speech_to_text": {
-                 "provider": "Default"
+               "transcription_enabled": true,
+               "transcription_config": {
+                 "provider": "gladia"
                },
-               "automatic_leave": {
-                 "waiting_room_timeout": 600
+               "timeout_config": {
+                 "waiting_room_timeout": 600,
+                 "no_one_joined_timeout": 600,
+                 "silence_timeout": 600
                }
              }'
     `
@@ -441,7 +445,7 @@ Here's an example POST request to [https://api.meetingbaas.com/bots](https://api
   <Tab value="Python">
     ```python title="join_meeting.py"
     import requests
-    url = "https://api.meetingbaas.com/bots"
+    url = "https://api.meetingbaas.com/v2/bots"
     headers = {
         "Content-Type": "application/json",
         "x-meeting-baas-api-key": "YOUR-API-KEY",
@@ -452,22 +456,25 @@ Here's an example POST request to [https://api.meetingbaas.com/bots](https://api
         "recording_mode": "speaker_view",
         "bot_image": "https://example.com/bot.jpg",
         "entry_message": "I am a good meeting bot :)",
-        "reserved": False,
-        "speech_to_text": {
-            "provider": "Default"
+        "transcription_enabled": True,
+        "transcription_config": {
+            "provider": "gladia"
         },
-        "automatic_leave": {
-            "waiting_room_timeout": 600  # 10 minutes in seconds
+        "timeout_config": {
+            "waiting_room_timeout": 600,
+            "no_one_joined_timeout": 600,
+            "silence_timeout": 600,
         }
     }
     response = requests.post(url, json=config, headers=headers)
-    print(response.json())
+    data = response.json()
+    print(data["data"]["bot_id"])
     ```
   </Tab>
 
   <Tab value="JavaScript">
     ```javascript title="join_meeting.js"
-    fetch("https://api.meetingbaas.com/bots", {
+    fetch("https://api.meetingbaas.com/v2/bots", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -476,20 +483,22 @@ Here's an example POST request to [https://api.meetingbaas.com/bots](https://api
       body: JSON.stringify({
         meeting_url: "YOUR-MEETING-URL",
         bot_name: "AI Notetaker",
-        reserved: false,
         recording_mode: "speaker_view",
         bot_image: "https://example.com/bot.jpg",
         entry_message: "I am a good meeting bot :)",
-        speech_to_text: {
-          provider: "Default",
+        transcription_enabled: true,
+        transcription_config: {
+          provider: "gladia",
         },
-        automatic_leave: {
+        timeout_config: {
           waiting_room_timeout: 600,
+          no_one_joined_timeout: 600,
+          silence_timeout: 600,
         },
       }),
     })
       .then((response) => response.json())
-      .then((data) => console.log(data.bot_id))
+      .then((data) => console.log(data.data.bot_id))
       .catch((error) => console.error("Error:", error));
     ```
   </Tab>
@@ -499,42 +508,47 @@ Let's break this down:
 
 -   `meeting_url`: The meeting URL to join. Accepts Google Meet, Microsoft Teams or Zoom URLs. (Required)
 -   `bot_name`: The display name of the bot. (Required)
--   `reserved`: (Required)
-    -   `false`: Sends a bot from our pool of _always ready_ meeting bots, immediately. Beware that **demand might temporarily be higher than the number of currently available bots**, which could imply a delay in the bot joining. When possible, prefer the true option which reserves an instance of an AI meeting bot.
-    -   `true`: Reserves in advance a meeting bot for an upcoming meeting, ensuring the presence of the bot at the start of the meeting, typically for planned calendar events. You need to **call this route exactly 4 minutes before the start of the meeting**.
--   `bot_image`: The URL of the image the bot will display. Must be a valid URI format. Optional.
+-   `bot_image`: The URL of the image the bot will display. Must be a valid HTTPS URI pointing to JPEG or PNG. Optional.
 -   `recording_mode`: Optional. One of:
     -   `"speaker_view"`: (default) The recording will only show the person speaking at any time
     -   `"gallery_view"`: The recording will show all the speakers
-    -   `"audio_only"`: The recording will be a mp3
--   `entry_message`: Optional. The message the bot will write within 15 seconds after being accepted in the meeting.
--   `speech_to_text`: Optional. If not provided, no transcription will be generated and processing time will be faster.
-    -   Must be an object with:
-        -   `provider`: One of:
-            -   `"Default"`: Standard transcription, no API key needed
-            -   `"Gladia"` or `"Runpod"`: Requires their respective API key to be provided
-        -   `api_key`: Required when using Gladia or Runpod providers. Must be a valid API key from the respective service.
--   `automatic_leave`: Optional object containing:
-    -   `waiting_room_timeout`: Time in seconds the bot will wait in a meeting room before dropping. Default is 600 (10 minutes)
-    -   `noone_joined_timeout`: Time in seconds the bot will wait if no one joins the meeting
+    -   `"audio_only"`: The recording will be audio-only (MP3)
+-   `entry_message`: Optional. The message the bot will write in the meeting chat when it joins (max 500 characters). Available for Google Meet and Zoom.
+-   `transcription_enabled`: Optional boolean. Set to `true` to enable transcription.
+-   `transcription_config`: Required if `transcription_enabled` is `true`.
+    -   `provider`: `"gladia"` (default). More providers coming soon.
+    -   `api_key`: Optional. Your own transcription provider API key (BYOK).
+    -   `custom_params`: Optional. Custom parameters for the transcription provider.
+-   `timeout_config`: Optional object containing:
+    -   `waiting_room_timeout`: Time in seconds the bot will wait in the waiting room (default 600, min 120, max 1800)
+    -   `no_one_joined_timeout`: Time in seconds the bot will wait if no one joins (default 600, min 120, max 1800)
+    -   `silence_timeout`: Time in seconds of silence before the bot leaves (default 600, min 300, max 1800)
 
 Additional optional parameters:
 
--   `webhook_url`: URL for webhook notifications
--   `deduplication_key`: String for deduplication. By default, Meeting Baas will reject you sending multiple bots to a same meeting within 5 minutes, to avoid spamming.
--   `streaming`: Object containing optional WebSocket streaming endpoints (16kHz):
+-   `allow_multiple_bots`: Boolean, default `true`. Set to `false` to prevent duplicate bots joining the same meeting within 5 minutes.
+-   `streaming_enabled`: Boolean, default `false`. Enable audio streaming.
+-   `streaming_config`: Required if `streaming_enabled` is `true`:
     -   `output`: WebSocket endpoint to receive audio stream from the meeting
     -   `input`: WebSocket endpoint to stream audio back into the meeting
--   `extra`: Additional custom data
--   `start_time`: UTC timestamp (uint64) for scheduled start time
+    -   `audio_frequency`: `"16khz"` or `"24khz"` (default `"24khz"`)
+-   `callback_enabled`: Boolean, default `false`. Enable per-bot callbacks.
+-   `callback_config`: Required if `callback_enabled` is `true`:
+    -   `url`: The URL to receive `bot.completed` and `bot.failed` events.
+    -   `method`: `"POST"` (default) or `"PUT"`.
+    -   `secret`: Optional secret included in `x-mb-secret` header for verification.
+-   `extra`: Additional custom metadata (included in webhooks and callbacks)
 
 This request will respond with the identifier of the bot you just created:
 
 ```http
-HTTP/2 200
+HTTP/2 201
 Content-Type: application/json
 
 {
-  "bot_id": 42
+  "success": true,
+  "data": {
+    "bot_id": "123e4567-e89b-12d3-a456-426614174000"
+  }
 }
 ```
