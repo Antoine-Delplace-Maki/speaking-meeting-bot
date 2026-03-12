@@ -12,6 +12,7 @@ from core.connection import (
     CLEANED_UP_CLIENTS,
     CLEANUP_REMEMBER_SECONDS,
     MEETING_DETAILS,
+    MEETING_MONITORS,
     PIPECAT_PROCESSES,
     TERMINAL_STATUSES,
     registry,
@@ -171,6 +172,9 @@ async def websocket_endpoint(
 
             if "bytes" in message:
                 audio_data = message["bytes"]
+                monitor = MEETING_MONITORS.get(internal_client_id)
+                if monitor:
+                    monitor.record_audio_activity(audio_data)
                 await message_router.send_to_pipecat(
                     audio_data, internal_client_id
                 )

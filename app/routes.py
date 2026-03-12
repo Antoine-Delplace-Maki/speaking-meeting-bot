@@ -25,11 +25,13 @@ from core.connection import (
     CLEANED_UP_CLIENTS,
     IN_CALL_STATUSES,
     MEETING_DETAILS,
+    MEETING_MONITORS,
     PENDING_PIPECAT_PARAMS,
     PIPECAT_PROCESSES,
     TERMINAL_STATUSES,
     registry,
 )
+from core.meeting_monitor import MeetingMonitor
 from core.process import (
     cleanup_greeting_trigger,
     get_greeting_trigger_path,
@@ -406,6 +408,9 @@ async def join_meeting(request: BotRequest, client_request: Request):
             f"/pipecat/{bot_client_id}"
         )
         greeting_trigger_file = get_greeting_trigger_path(bot_client_id)
+
+        auto_leave_dict = request.auto_leave.model_dump()
+
         pipecat_params = {
             "websocket_url": pipecat_ws_url,
             "meeting_url": request.meeting_url,
@@ -415,7 +420,17 @@ async def join_meeting(request: BotRequest, client_request: Request):
             "api_key": api_key,
             "meetingbaas_bot_id": meetingbaas_bot_id,
             "greeting_trigger_file": greeting_trigger_file,
+            "auto_leave_config": auto_leave_dict,
         }
+
+        monitor = MeetingMonitor(
+            client_id=bot_client_id,
+            meetingbaas_bot_id=meetingbaas_bot_id,
+            api_key=api_key,
+            idle_timeout=request.auto_leave.idle_timeout,
+            alone_timeout=request.auto_leave.alone_timeout,
+        )
+        MEETING_MONITORS[bot_client_id] = monitor
 
         # Store params as fallback in case the early start fails
         PENDING_PIPECAT_PARAMS[bot_client_id] = pipecat_params
@@ -549,7 +564,13 @@ async def leave_bot(
         # Add a small delay to allow for clean disconnection
         await asyncio.sleep(0.5)
 
-    # 3. Terminate the Pipecat process after WebSockets are closed
+    # 3. Stop the meeting monitor
+    if client_id:
+        monitor = MEETING_MONITORS.pop(client_id, None)
+        if monitor:
+            monitor.stop()
+
+    # 4. Terminate the Pipecat process after WebSockets are closed
     if client_id and client_id in PIPECAT_PROCESSES:
         process = PIPECAT_PROCESSES[client_id]
         if process and process.poll() is None:  # If process is still running
@@ -672,6 +693,10 @@ def _maybe_start_pipecat(meetingbaas_bot_id: str) -> None:
         )
         return
 
+    monitor = MEETING_MONITORS.get(client_id)
+    if monitor:
+        monitor.start()
+
     if client_id in PIPECAT_PROCESSES:
         proc = PIPECAT_PROCESSES[client_id]
         if proc.poll() is None:
@@ -711,6 +736,10 @@ def _cleanup_bot(meetingbaas_bot_id: str) -> None:
     client_id = BOT_ID_TO_CLIENT.get(meetingbaas_bot_id)
     if not client_id:
         return
+
+    monitor = MEETING_MONITORS.pop(client_id, None)
+    if monitor:
+        monitor.stop()
 
     PENDING_PIPECAT_PARAMS.pop(client_id, None)
     _GREETING_TRIGGERED.discard(client_id)
@@ -800,6 +829,26 @@ async def meetingbaas_webhook(request: Request):
                 f"error={error_code}: {error_msg}"
             )
             _cleanup_bot(bot_id)
+
+        elif event in ("participant.joined", "bot.participant_joined"):
+            client_id = BOT_ID_TO_CLIENT.get(bot_id)
+            monitor = MEETING_MONITORS.get(client_id) if client_id else None
+            if monitor:
+                monitor.participant_joined()
+            logger.info(
+                f"[webhook] {event}  bot_id={bot_id}  "
+                f"participant={data.get('participant', {}).get('name', 'unknown')}"
+            )
+
+        elif event in ("participant.left", "bot.participant_left"):
+            client_id = BOT_ID_TO_CLIENT.get(bot_id)
+            monitor = MEETING_MONITORS.get(client_id) if client_id else None
+            if monitor:
+                monitor.participant_left()
+            logger.info(
+                f"[webhook] {event}  bot_id={bot_id}  "
+                f"participant={data.get('participant', {}).get('name', 'unknown')}"
+            )
 
         else:
             logger.info(

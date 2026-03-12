@@ -1,5 +1,6 @@
 import argparse
 import asyncio
+import json
 import os
 from datetime import datetime
 
@@ -9,7 +10,8 @@ from dotenv import load_dotenv
 from pipecat.adapters.schemas.function_schema import FunctionSchema
 from pipecat.adapters.schemas.tools_schema import ToolsSchema
 from pipecat.audio.vad.silero import SileroVADAnalyzer, VADParams
-from pipecat.frames.frames import LLMMessagesUpdateFrame, TextFrame
+from pipecat.frames.frames import EndTaskFrame, LLMMessagesUpdateFrame, TextFrame
+from pipecat.processors.frame_processor import FrameDirection
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
@@ -106,6 +108,9 @@ async def main(
     enable_tools: bool = True,
     persona_data_override: dict = None,
     greeting_trigger_file: str = "",
+    api_key: str = "",
+    meetingbaas_bot_id: str = "",
+    auto_leave_config: dict = None,
 ):
     """
     Run the MeetingBaas bot with specified configurations
@@ -216,6 +221,22 @@ async def main(
             " PUNCTUATION OR CAPS. JUST SAY WHAT YOU"
             " NEED TO SAY IN A CONCISE MANNER."
         )
+    enable_llm_leave = (
+        auto_leave_config.get("enable_llm_leave", True)
+        if auto_leave_config
+        else True
+    )
+    if enable_tools and enable_llm_leave and meetingbaas_bot_id and api_key:
+        system_content += (
+            "\n\nYou have a leave_meeting tool. Use it ONLY when:"
+            "\n- Someone explicitly asks you to leave the meeting"
+            "\n- The meeting is clearly over and everyone is saying goodbye"
+            "\n- You have been dismissed or told you are no longer needed"
+            "\nDo NOT leave preemptively or without good reason. "
+            "When you call leave_meeting, you will be prompted to say a brief, "
+            "natural goodbye. The meeting will end shortly after you finish speaking."
+        )
+
     log_and_flush(
         logging.INFO,
         f"[PERSONA] System prompt length: {len(system_content)} chars",
@@ -229,6 +250,8 @@ async def main(
         ),
     )
     log_and_flush(logging.INFO, "[LLM] OpenAI LLM initialized with model=gpt-4.1")
+
+    _leave_after_goodbye = False
 
     if enable_tools:
         log_and_flush(logging.INFO, "[TOOLS] Registering function tools")
@@ -265,8 +288,42 @@ async def main(
             required=["location"],
         )
 
-        # Create tools schema
-        tools = ToolsSchema(standard_tools=[weather_function, time_function])
+        tool_list = [weather_function, time_function]
+
+        if enable_llm_leave and meetingbaas_bot_id and api_key:
+            async def leave_meeting(params: FunctionCallParams):
+                nonlocal _leave_after_goodbye
+                reason = params.arguments.get("reason", "Meeting concluded")
+                _leave_after_goodbye = True
+                log_and_flush(logging.INFO, f"[LEAVE] leave_meeting tool called: {reason}")
+                await params.result_callback(
+                    f"Say a brief, natural goodbye to everyone. Reason: {reason}"
+                )
+                await params.llm.push_frame(
+                    EndTaskFrame(), FrameDirection.UPSTREAM
+                )
+
+            llm.register_function("leave_meeting", leave_meeting)
+
+            leave_function = FunctionSchema(
+                name="leave_meeting",
+                description=(
+                    "Leave the current meeting. Use this when someone explicitly "
+                    "asks you to leave, when the meeting is clearly over and "
+                    "everyone is saying goodbye, or when you have been dismissed."
+                ),
+                properties={
+                    "reason": {
+                        "type": "string",
+                        "description": "Brief reason for leaving the meeting",
+                    },
+                },
+                required=["reason"],
+            )
+            tool_list.append(leave_function)
+            log_and_flush(logging.INFO, "[TOOLS] leave_meeting tool registered")
+
+        tools = ToolsSchema(standard_tools=tool_list)
     else:
         log_and_flush(logging.INFO, "[TOOLS] Function tools are disabled")
         tools = None
@@ -418,6 +475,27 @@ async def main(
         import traceback
         log_and_flush(logging.ERROR, f"[ERROR] Traceback: {traceback.format_exc()}")
         raise
+    finally:
+        if _leave_after_goodbye and meetingbaas_bot_id and api_key:
+            log_and_flush(
+                logging.INFO,
+                "[LEAVE] Goodbye complete, waiting 2 seconds before leaving...",
+            )
+            await asyncio.sleep(2)
+            try:
+                from scripts.meetingbaas_api import leave_meeting_bot
+
+                await asyncio.to_thread(
+                    leave_meeting_bot, meetingbaas_bot_id, api_key
+                )
+                log_and_flush(
+                    logging.INFO, "[LEAVE] Bot left meeting after goodbye"
+                )
+            except Exception as exc:
+                log_and_flush(
+                    logging.ERROR,
+                    f"[LEAVE] Error leaving meeting: {exc}",
+                )
 
 
 if __name__ == "__main__":
@@ -456,6 +534,11 @@ if __name__ == "__main__":
         default="",
         help="Path to file that signals when to send the initial greeting",
     )
+    parser.add_argument(
+        "--auto-leave-config",
+        default="",
+        help="Auto-leave configuration as JSON string",
+    )
 
     args = parser.parse_args()
 
@@ -464,7 +547,6 @@ if __name__ == "__main__":
     persona_data_override = None
     if args.persona_data_json:
         try:
-            import json
             persona_data = json.loads(args.persona_data_json)
 
             if persona_data.get("is_temporary"):
@@ -480,6 +562,13 @@ if __name__ == "__main__":
         except Exception as e:
             print(f"Error parsing persona data JSON: {e}")
 
+    auto_leave_cfg = None
+    if args.auto_leave_config:
+        try:
+            auto_leave_cfg = json.loads(args.auto_leave_config)
+        except Exception as e:
+            print(f"Error parsing auto-leave config JSON: {e}")
+
     # Run the bot
     asyncio.run(
         main(
@@ -492,5 +581,8 @@ if __name__ == "__main__":
             enable_tools=args.enable_tools,
             persona_data_override=persona_data_override,
             greeting_trigger_file=args.greeting_trigger_file,
+            api_key=args.api_key or "",
+            meetingbaas_bot_id=args.meetingbaas_bot_id or "",
+            auto_leave_config=auto_leave_cfg,
         )
     )

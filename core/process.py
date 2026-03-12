@@ -55,6 +55,7 @@ def start_pipecat_process(
     api_key: str = "",
     meetingbaas_bot_id: str = "",
     greeting_trigger_file: str = "",
+    auto_leave_config: Dict[str, Any] | None = None,
 ) -> subprocess.Popen:
     """
     Start a Pipecat process for a client.
@@ -114,6 +115,9 @@ def start_pipecat_process(
 
     if greeting_trigger_file:
         command.extend(["--greeting-trigger-file", greeting_trigger_file])
+
+    if auto_leave_config:
+        command.extend(["--auto-leave-config", json.dumps(auto_leave_config)])
 
     # Start the process
     process = subprocess.Popen(

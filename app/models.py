@@ -6,6 +6,23 @@ from datetime import datetime
 from pydantic import BaseModel, Field, HttpUrl
 
 
+class AutoLeaveConfig(BaseModel):
+    """Configuration for automatic meeting leave behavior."""
+
+    idle_timeout: int = Field(
+        300,
+        description="Seconds of no speech activity before the bot auto-leaves. Set to 0 to disable.",
+    )
+    alone_timeout: int = Field(
+        120,
+        description="Seconds with no other participants before the bot auto-leaves. Set to 0 to disable.",
+    )
+    enable_llm_leave: bool = Field(
+        True,
+        description="Allow the LLM to decide to leave based on conversation context (e.g., when dismissed).",
+    )
+
+
 class BotRequest(BaseModel):
     """Request model for creating a speaking bot in a meeting."""
 
@@ -24,6 +41,10 @@ class BotRequest(BaseModel):
     extra: Optional[Dict[str, Any]] = None
     enable_tools: bool = True
     prompt: Optional[str] = None
+    auto_leave: AutoLeaveConfig = Field(
+        default_factory=AutoLeaveConfig,
+        description="Configuration for when the bot should automatically leave the meeting.",
+    )
 
     # NOTE: streaming_audio_frequency is intentionally excluded and handled internally
 
@@ -38,7 +59,12 @@ class BotRequest(BaseModel):
                 "enable_tools": True,
                 "extra": {"company": "ACME Corp", "meeting_purpose": "Weekly sync"},
                 "prompt": "You are Meeting Assistant, a concise and professional \
-                AI bot that helps summarize key points and keep the meeting on track. Speak clearly and stay on topic."
+                AI bot that helps summarize key points and keep the meeting on track. Speak clearly and stay on topic.",
+                "auto_leave": {
+                    "idle_timeout": 300,
+                    "alone_timeout": 120,
+                    "enable_llm_leave": True,
+                },
             }
         }
 
