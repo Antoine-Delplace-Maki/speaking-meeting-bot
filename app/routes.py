@@ -313,8 +313,7 @@ async def join_meeting(request: BotRequest, client_request: Request):
     final_entry_message: Optional[str] = request.entry_message
     if not final_entry_message and resolved_persona_data.get("entry_message"):
         final_entry_message = resolved_persona_data.get("entry_message")
-    elif not final_entry_message and resolved_persona_data.get("is_temporary", False):
-        # For temporary personas without a specified entry_message, provide a dynamic default
+    elif not final_entry_message and resolved_persona_data.get("is_temporary", False) and not resolved_persona_data.get("is_randomized_candidate", False):
         final_entry_message = f"Hello, I'm {persona_name_for_logging}, ready to assist you throughout this session."
 
     # Create bot directly through MeetingBaas API
