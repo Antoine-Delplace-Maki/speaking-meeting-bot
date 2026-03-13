@@ -6,6 +6,8 @@ import time
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
+from collections import defaultdict
+
 from core.connection import (
     BOT_ID_TO_CLIENT,
     BOT_STATUS,
@@ -20,7 +22,9 @@ from core.connection import (
 from core.process import terminate_process_gracefully
 from core.router import router as message_router
 from meetingbaas_pipecat.utils.logger import logger
-from utils.ngrok import LOCAL_DEV_MODE, log_ngrok_status, release_ngrok_url
+from utils.ngrok import LOCAL_DEV_MODE, NGROK_URLS, log_ngrok_status, release_ngrok_url
+
+_RECONNECT_COUNTS: dict[str, int] = defaultdict(int)
 
 INTERNAL_PORT = os.getenv("PORT", "7014")
 
@@ -68,10 +72,23 @@ async def websocket_endpoint(
 ):
     """Handle WebSocket connections from MeetingBaas clients."""
     if _is_stale_client(client_id):
-        logger.info(
-            f"Ignoring reconnection from terminal client "
-            f"{client_id}"
-        )
+        _RECONNECT_COUNTS[client_id] += 1
+        count = _RECONNECT_COUNTS[client_id]
+        if count == 1:
+            logger.info(
+                f"Ignoring reconnection from terminal client "
+                f"{client_id}"
+            )
+        elif count % 10 == 0:
+            logger.info(
+                f"Still ignoring reconnections from terminal "
+                f"client {client_id} ({count} attempts)"
+            )
+        else:
+            logger.debug(
+                f"Ignoring reconnection from terminal client "
+                f"{client_id} (attempt {count})"
+            )
         await websocket.accept()
         await websocket.close(
             code=4410, reason="Session already ended"
@@ -237,7 +254,8 @@ async def websocket_endpoint(
 
             if LOCAL_DEV_MODE:
                 release_ngrok_url(client_id)
-                log_ngrok_status()
+                if NGROK_URLS:
+                    log_ngrok_status()
         else:
             logger.info(
                 f"Client {client_id} disconnected "
@@ -295,7 +313,7 @@ async def pipecat_websocket(websocket: WebSocket, client_id: str):
             # Log at debug level since this can happen during normal shutdown
             logger.debug(f"Error disconnecting Pipecat client {client_id}: {e}")
 
-        # Release ngrok URL
         if LOCAL_DEV_MODE:
             release_ngrok_url(client_id)
-            log_ngrok_status()
+            if NGROK_URLS:
+                log_ngrok_status()

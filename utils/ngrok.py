@@ -44,10 +44,11 @@ else:
 def load_ngrok_urls() -> List[str]:
     """
     Load ngrok URLs using the ngrok API.
-    Returns a list of available ngrok URLs with preference for those pointing to port 8766.
+    Returns a deduplicated list of available ngrok URLs with preference
+    for those pointing to the configured port.
     """
     urls = []
-    priority_urls = []  # For tunnels pointing to port 8766
+    priority_urls = []
 
     try:
         # Try to fetch active ngrok tunnels from the API
@@ -88,6 +89,9 @@ def load_ngrok_urls() -> List[str]:
                         f"✅ Using {len(priority_urls)} priority tunnels for port {CONFIGURED_PORT}"
                     )
                     urls = priority_urls + urls
+
+                # Deduplicate while preserving order (priority URLs first)
+                urls = list(dict.fromkeys(urls))
 
                 if not urls:
                     logger.warning("⚠️ Found tunnels but none with HTTPS protocol!")
