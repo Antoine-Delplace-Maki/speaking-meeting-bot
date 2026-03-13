@@ -1,9 +1,0 @@
-version: "2"
-
-tunnels:
-  proxy1:
-    proto: http
-    addr: 7014
-  proxy2:
-    proto: http
-    addr: 7015
