@@ -155,7 +155,7 @@ async def generate_random_candidate(base_persona: Dict[str, Any]) -> Dict[str, A
             model="gpt-4.1-mini",
             messages=[{"role": "user", "content": generation_prompt}],
             max_tokens=500,
-            temperature=1.0,
+            temperature=0.7,
         )
 
         raw = response.choices[0].message.content.strip()
