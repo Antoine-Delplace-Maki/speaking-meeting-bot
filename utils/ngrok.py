@@ -43,16 +43,21 @@ else:
 
 def load_ngrok_urls() -> List[str]:
     """
-    Load ngrok URLs using the ngrok API.
+    Load tunnel URLs using the ngrok API.
+    Skipped entirely when BASE_URL is already configured (e.g. cloudflared).
     Returns a deduplicated list of available ngrok URLs with preference
     for those pointing to the configured port.
     """
+    if BASE_URL:
+        logger.info(
+            f"📡 BASE_URL is set ({BASE_URL}), skipping ngrok tunnel discovery"
+        )
+        return []
+
     urls = []
     priority_urls = []
 
     try:
-        # Try to fetch active ngrok tunnels from the API
-        # ngrok web interface is usually available at localhost:4040
         logger.info("📡 Attempting to fetch ngrok tunnels from API...")
         response = requests.get("http://localhost:4040/api/tunnels")
 
@@ -63,17 +68,14 @@ def load_ngrok_urls() -> List[str]:
             if tunnels:
                 logger.info(f"🔍 Found {len(tunnels)} active ngrok tunnels")
 
-                # Extract public URLs from tunnels
                 for tunnel in tunnels:
                     public_url = tunnel.get("public_url")
                     config = tunnel.get("config", {})
                     addr = config.get("addr", "")
 
-                    # Log the tunnel details for debugging
                     logger.info(f"🔍 Tunnel: {public_url} -> {addr}")
 
                     if public_url and public_url.startswith("https://"):
-                        # Check if this tunnel points to the configured port
                         if addr and CONFIGURED_PORT in addr:
                             logger.info(
                                 f"✅ Found priority tunnel for port {CONFIGURED_PORT}: {public_url}"
@@ -83,14 +85,12 @@ def load_ngrok_urls() -> List[str]:
                             urls.append(public_url)
                             logger.info(f"✅ Added regular ngrok tunnel: {public_url}")
 
-                # Use priority URLs first, then regular ones
                 if priority_urls:
                     logger.info(
                         f"✅ Using {len(priority_urls)} priority tunnels for port {CONFIGURED_PORT}"
                     )
                     urls = priority_urls + urls
 
-                # Deduplicate while preserving order (priority URLs first)
                 urls = list(dict.fromkeys(urls))
 
                 if not urls:
@@ -107,15 +107,14 @@ def load_ngrok_urls() -> List[str]:
     except Exception as e:
         logger.error(f"❌ Error accessing ngrok API: {e}")
         logger.info(
-            "Make sure ngrok is running with 'ngrok start --all' before starting this server"
+            "Make sure ngrok is running with 'ngrok start --all' or set BASE_URL for cloudflared/other tunnels"
         )
 
-    # Log the final URLs we're using
     if urls:
-        logger.info(f"📡 Final ngrok URLs to be used: {urls}")
+        logger.info(f"📡 Final tunnel URLs to be used: {urls}")
     else:
         logger.warning(
-            "⚠️ No ngrok URLs found - websocket connections may not work properly!"
+            "⚠️ No tunnel URLs found - websocket connections may not work properly!"
         )
 
     return urls
@@ -265,15 +264,13 @@ def determine_websocket_url(
                 logger.info(f"Using ngrok WebSocket URL: {ngrok_url}")
                 return ngrok_url, temp_client_id
             else:
-                # If we're here, we've used all available ngrok URLs
-                logger.warning("⚠️ All ngrok URLs have been used")
-                # In local dev mode, we should require ngrok URLs
+                logger.warning("⚠️ All tunnel URLs have been used")
                 raise HTTPException(
                     status_code=400,
-                    detail="No more ngrok URLs available. Limited to 2 bots in local dev mode.",
+                    detail="No more tunnel URLs available. Set BASE_URL or add more ngrok tunnels.",
                 )
         else:
-            logger.warning("⚠️ No ngrok URLs found despite being in LOCAL_DEV_MODE")
+            logger.warning("⚠️ No tunnel URLs found despite being in LOCAL_DEV_MODE")
 
     # 4. Auto-detect from request (fallback, only for non-local environments)
     host = client_request.headers.get("host", f"localhost:{CONFIGURED_PORT}")

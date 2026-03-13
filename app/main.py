@@ -267,17 +267,21 @@ def start_server(host: str = "0.0.0.0", port: int = 7014, local_dev: bool = Fals
 
     if local_dev:
         print("\n⚠️ Starting in local development mode")
-        # Cache the ngrok URLs at server start
-        NGROK_URLS = load_ngrok_urls()
 
-        if NGROK_URLS:
-            print(f"✅ {len(NGROK_URLS)} Bot(s) available from Ngrok")
-            for i, url in enumerate(NGROK_URLS):
-                print(f"  Bot {i + 1}: {url}")
+        base_url = os.environ.get("BASE_URL")
+        if base_url:
+            print(f"✅ Using BASE_URL from environment: {base_url}")
         else:
-            print(
-                "⚠️ No ngrok URLs configured. Using auto-detection for WebSocket URLs."
-            )
+            NGROK_URLS = load_ngrok_urls()
+
+            if NGROK_URLS:
+                print(f"✅ {len(NGROK_URLS)} Bot(s) available from tunnel")
+                for i, url in enumerate(NGROK_URLS):
+                    print(f"  Bot {i + 1}: {url}")
+            else:
+                print(
+                    "⚠️ No tunnel URLs configured. Using auto-detection for WebSocket URLs."
+                )
         print("\n")
 
     logger.info(f"Starting WebSocket server on {host}:{server_port}")
